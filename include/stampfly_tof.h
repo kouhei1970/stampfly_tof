@@ -54,15 +54,25 @@ typedef enum {
     STAMPFLY_TOF_SENSOR_BOTH = 2
 } stampfly_tof_sensor_t;
 
+// Forward declaration
+typedef struct stampfly_tof_handle_s stampfly_tof_handle_t;
+
+/**
+ * @brief Interrupt callback function type
+ */
+typedef void (*stampfly_tof_interrupt_callback_t)(stampfly_tof_handle_t *handle, stampfly_tof_sensor_t sensor);
+
 /**
  * @brief StampFly ToF System Handle
  */
-typedef struct {
-    vl53l3cx_dev_t front_sensor;    // Front sensor device
-    vl53l3cx_dev_t bottom_sensor;   // Bottom sensor device
-    i2c_port_t i2c_port;            // I2C port number
-    bool initialized;               // Initialization state
-} stampfly_tof_handle_t;
+struct stampfly_tof_handle_s {
+    vl53l3cx_dev_t front_sensor;        // Front sensor device
+    vl53l3cx_dev_t bottom_sensor;       // Bottom sensor device
+    i2c_port_t i2c_port;                // I2C port number
+    bool initialized;                   // Initialization state
+    stampfly_tof_interrupt_callback_t front_callback;   // Front sensor callback
+    stampfly_tof_interrupt_callback_t bottom_callback;  // Bottom sensor callback
+};
 
 /**
  * @brief Dual Sensor Ranging Result
@@ -173,6 +183,31 @@ esp_err_t stampfly_tof_set_xshut(stampfly_tof_sensor_t sensor, uint8_t level);
  * @return ESP_OK on success
  */
 esp_err_t stampfly_tof_get_int_pin(stampfly_tof_sensor_t sensor, uint8_t *level);
+
+/**
+ * @brief Enable GPIO interrupts for data ready detection
+ *
+ * This function configures GPIO interrupts on the INT pins to detect
+ * when new ranging data is available. This is more efficient than polling.
+ *
+ * @param handle Pointer to system handle
+ * @param sensor Sensor selection
+ * @param callback Callback function to be called when data is ready
+ * @return ESP_OK on success
+ */
+esp_err_t stampfly_tof_enable_interrupt(stampfly_tof_handle_t *handle,
+                                         stampfly_tof_sensor_t sensor,
+                                         stampfly_tof_interrupt_callback_t callback);
+
+/**
+ * @brief Disable GPIO interrupts
+ *
+ * @param handle Pointer to system handle
+ * @param sensor Sensor selection
+ * @return ESP_OK on success
+ */
+esp_err_t stampfly_tof_disable_interrupt(stampfly_tof_handle_t *handle,
+                                          stampfly_tof_sensor_t sensor);
 
 #ifdef __cplusplus
 }

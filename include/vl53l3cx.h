@@ -291,6 +291,22 @@ esp_err_t vl53l3cx_clear_interrupt(vl53l3cx_dev_t *dev);
  */
 const char* vl53l3cx_get_range_status_string(uint8_t status);
 
+/**
+ * @brief Check if data is ready (non-blocking)
+ *
+ * @param dev Device handle
+ * @param ready Pointer to store ready flag (1=ready, 0=not ready)
+ * @return ESP_OK on success
+ */
+esp_err_t vl53l3cx_check_data_ready(vl53l3cx_dev_t *dev, uint8_t *ready);
+
+/**
+ * @brief Data ready callback function type
+ *
+ * @param dev Device handle that triggered the interrupt
+ */
+typedef void (*vl53l3cx_data_ready_callback_t)(vl53l3cx_dev_t *dev);
+
 #ifdef __cplusplus
 }
 #endif

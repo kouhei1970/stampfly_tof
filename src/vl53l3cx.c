@@ -667,3 +667,21 @@ const char* vl53l3cx_get_range_status_string(uint8_t status)
             return "Unknown Status";
     }
 }
+
+esp_err_t vl53l3cx_check_data_ready(vl53l3cx_dev_t *dev, uint8_t *ready)
+{
+    if (dev == NULL || ready == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uint8_t int_status;
+    esp_err_t ret = vl53l3cx_read_byte(dev, VL53L3CX_REG_RESULT_INTERRUPT_STATUS, &int_status);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    // Check bit 5: NEW_DATA_READY
+    *ready = (int_status & 0x20) ? 1 : 0;
+
+    return ESP_OK;
+}

@@ -11,6 +11,10 @@
 
 static const char *TAG = "STAMPFLY_TOF";
 
+// Static handle pointers for ISR access
+static stampfly_tof_handle_t *g_front_handle = NULL;
+static stampfly_tof_handle_t *g_bottom_handle = NULL;
+
 /**
  * @brief Initialize GPIO pins for ToF sensors
  */
@@ -364,4 +368,140 @@ esp_err_t stampfly_tof_wait_data_ready(stampfly_tof_handle_t *handle,
     } else {
         return ESP_ERR_INVALID_ARG;
     }
+}
+
+/**
+ * @brief GPIO ISR handler for front sensor
+ */
+static void IRAM_ATTR stampfly_tof_front_isr_handler(void *arg)
+{
+    if (g_front_handle != NULL && g_front_handle->front_callback != NULL) {
+        g_front_handle->front_callback(g_front_handle, STAMPFLY_TOF_SENSOR_FRONT);
+    }
+}
+
+/**
+ * @brief GPIO ISR handler for bottom sensor
+ */
+static void IRAM_ATTR stampfly_tof_bottom_isr_handler(void *arg)
+{
+    if (g_bottom_handle != NULL && g_bottom_handle->bottom_callback != NULL) {
+        g_bottom_handle->bottom_callback(g_bottom_handle, STAMPFLY_TOF_SENSOR_BOTTOM);
+    }
+}
+
+esp_err_t stampfly_tof_enable_interrupt(stampfly_tof_handle_t *handle,
+                                         stampfly_tof_sensor_t sensor,
+                                         stampfly_tof_interrupt_callback_t callback)
+{
+    if (handle == NULL || !handle->initialized || callback == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t ret;
+
+    // Install GPIO ISR service if not already installed
+    static bool isr_service_installed = false;
+    if (!isr_service_installed) {
+        ret = gpio_install_isr_service(0);
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            ESP_LOGE(TAG, "Failed to install ISR service");
+            return ret;
+        }
+        isr_service_installed = true;
+    }
+
+    if (sensor == STAMPFLY_TOF_SENSOR_FRONT || sensor == STAMPFLY_TOF_SENSOR_BOTH) {
+        // Configure front sensor interrupt
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << STAMPFLY_TOF_FRONT_INT_PIN),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_NEGEDGE,  // Interrupt on falling edge (ACTIVE_LOW)
+        };
+        ret = gpio_config(&io_conf);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to configure front INT pin for interrupt");
+            return ret;
+        }
+
+        // Add ISR handler
+        ret = gpio_isr_handler_add(STAMPFLY_TOF_FRONT_INT_PIN, stampfly_tof_front_isr_handler, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to add front ISR handler");
+            return ret;
+        }
+
+        handle->front_callback = callback;
+        g_front_handle = handle;
+        ESP_LOGI(TAG, "Front sensor interrupt enabled");
+    }
+
+    if (sensor == STAMPFLY_TOF_SENSOR_BOTTOM || sensor == STAMPFLY_TOF_SENSOR_BOTH) {
+        // Configure bottom sensor interrupt
+        gpio_config_t io_conf = {
+            .pin_bit_mask = (1ULL << STAMPFLY_TOF_BOTTOM_INT_PIN),
+            .mode = GPIO_MODE_INPUT,
+            .pull_up_en = GPIO_PULLUP_ENABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_NEGEDGE,
+        };
+        ret = gpio_config(&io_conf);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to configure bottom INT pin for interrupt");
+            return ret;
+        }
+
+        ret = gpio_isr_handler_add(STAMPFLY_TOF_BOTTOM_INT_PIN, stampfly_tof_bottom_isr_handler, NULL);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to add bottom ISR handler");
+            return ret;
+        }
+
+        handle->bottom_callback = callback;
+        g_bottom_handle = handle;
+        ESP_LOGI(TAG, "Bottom sensor interrupt enabled");
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t stampfly_tof_disable_interrupt(stampfly_tof_handle_t *handle,
+                                          stampfly_tof_sensor_t sensor)
+{
+    if (handle == NULL || !handle->initialized) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    esp_err_t ret;
+
+    if (sensor == STAMPFLY_TOF_SENSOR_FRONT || sensor == STAMPFLY_TOF_SENSOR_BOTH) {
+        ret = gpio_isr_handler_remove(STAMPFLY_TOF_FRONT_INT_PIN);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to remove front ISR handler");
+        }
+
+        // Disable interrupt on pin
+        gpio_set_intr_type(STAMPFLY_TOF_FRONT_INT_PIN, GPIO_INTR_DISABLE);
+
+        handle->front_callback = NULL;
+        g_front_handle = NULL;
+        ESP_LOGI(TAG, "Front sensor interrupt disabled");
+    }
+
+    if (sensor == STAMPFLY_TOF_SENSOR_BOTTOM || sensor == STAMPFLY_TOF_SENSOR_BOTH) {
+        ret = gpio_isr_handler_remove(STAMPFLY_TOF_BOTTOM_INT_PIN);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to remove bottom ISR handler");
+        }
+
+        gpio_set_intr_type(STAMPFLY_TOF_BOTTOM_INT_PIN, GPIO_INTR_DISABLE);
+
+        handle->bottom_callback = NULL;
+        g_bottom_handle = NULL;
+        ESP_LOGI(TAG, "Bottom sensor interrupt disabled");
+    }
+
+    return ESP_OK;
 }
