@@ -161,6 +161,58 @@ esp_err_t vl53l3cx_wait_boot(vl53l3cx_dev_t *dev)
     return ESP_OK;
 }
 
+/**
+ * @brief Read NVM calibration data from device registers
+ *
+ * The firmware automatically loads NVM data to registers during boot.
+ * We read this data for validation and future use.
+ */
+static esp_err_t vl53l3cx_read_nvm_data(vl53l3cx_dev_t *dev)
+{
+    esp_err_t ret;
+
+    // Read Static NVM Managed Data (11 bytes from 0x0001)
+    #define STATIC_NVM_START_REG    0x0001
+    #define STATIC_NVM_SIZE         11
+    uint8_t static_nvm[STATIC_NVM_SIZE];
+
+    ret = vl53l3cx_read_reg(dev, STATIC_NVM_START_REG, static_nvm, STATIC_NVM_SIZE);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to read static NVM data");
+        return ret;
+    }
+
+    // Read Customer NVM Managed Data (23 bytes from 0x000D)
+    #define CUSTOMER_NVM_START_REG  0x000D
+    #define CUSTOMER_NVM_SIZE       23
+    uint8_t customer_nvm[CUSTOMER_NVM_SIZE];
+
+    ret = vl53l3cx_read_reg(dev, CUSTOMER_NVM_START_REG, customer_nvm, CUSTOMER_NVM_SIZE);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to read customer NVM data");
+        return ret;
+    }
+
+    // Read NVM Copy Data (49 bytes from 0x010F - IDENTIFICATION__MODEL_ID)
+    #define NVM_COPY_START_REG      0x010F
+    #define NVM_COPY_SIZE           49
+    uint8_t nvm_copy[NVM_COPY_SIZE];
+
+    ret = vl53l3cx_read_reg(dev, NVM_COPY_START_REG, nvm_copy, NVM_COPY_SIZE);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to read NVM copy data");
+        return ret;
+    }
+
+    // Log NVM data for verification
+    ESP_LOGI(TAG, "NVM Data Read:");
+    ESP_LOGI(TAG, "  Model ID: 0x%02X, Module Type: 0x%02X, Revision: 0x%02X",
+             nvm_copy[0], nvm_copy[1], nvm_copy[2]);
+    ESP_LOG_BUFFER_HEX_LEVEL(TAG, nvm_copy, 16, ESP_LOG_DEBUG);
+
+    return ESP_OK;
+}
+
 esp_err_t vl53l3cx_set_preset_mode_medium_range(vl53l3cx_dev_t *dev)
 {
     esp_err_t ret;
@@ -204,12 +256,12 @@ esp_err_t vl53l3cx_set_preset_mode_medium_range(vl53l3cx_dev_t *dev)
     if (ret != ESP_OK) return ret;
 
     // ========================================
-    // General Configuration
+    // General Configuration (Updated to match official driver)
     // ========================================
     ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_INTERRUPT_CONFIG_GPIO, 0x20);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_CAL_CONFIG_VCSEL_START, 0x0B);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_CAL_CONFIG_VCSEL_START, 0x05);
     if (ret != ESP_OK) return ret;
 
     ret = vl53l3cx_write_word(dev, VL53L3CX_REG_CAL_CONFIG_REPEAT_RATE, 0x0000);
@@ -218,38 +270,38 @@ esp_err_t vl53l3cx_set_preset_mode_medium_range(vl53l3cx_dev_t *dev)
     ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_GLOBAL_CONFIG_VCSEL_WIDTH, 0x02);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_PHASECAL_CONFIG_TIMEOUT_MACROP, 0x0D);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_PHASECAL_CONFIG_TIMEOUT_MACROP, 0xF5);
     if (ret != ESP_OK) return ret;
 
     ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_PHASECAL_CONFIG_TARGET, 0x21);
     if (ret != ESP_OK) return ret;
 
     // ========================================
-    // Timing Configuration
+    // Timing Configuration (Updated to match official driver)
     // ========================================
-    ret = vl53l3cx_write_word(dev, VL53L3CX_REG_MM_CONFIG_TIMEOUT_MACROP_A, 0x001A);
+    ret = vl53l3cx_write_word(dev, VL53L3CX_REG_MM_CONFIG_TIMEOUT_MACROP_A, 0x0036);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_word(dev, VL53L3CX_REG_MM_CONFIG_TIMEOUT_MACROP_B, 0x0020);
+    ret = vl53l3cx_write_word(dev, VL53L3CX_REG_MM_CONFIG_TIMEOUT_MACROP_B, 0x0028);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_word(dev, VL53L3CX_REG_RANGE_CONFIG_TIMEOUT_MACROP_A, 0x01CC);
+    ret = vl53l3cx_write_word(dev, VL53L3CX_REG_RANGE_CONFIG_TIMEOUT_MACROP_A, 0x0044);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGE_CONFIG_VCSEL_PERIOD_A, 0x0B);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGE_CONFIG_VCSEL_PERIOD_A, 0x05);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_word(dev, VL53L3CX_REG_RANGE_CONFIG_TIMEOUT_MACROP_B, 0x01F5);
+    ret = vl53l3cx_write_word(dev, VL53L3CX_REG_RANGE_CONFIG_TIMEOUT_MACROP_B, 0x0033);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGE_CONFIG_VCSEL_PERIOD_B, 0x09);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGE_CONFIG_VCSEL_PERIOD_B, 0x07);
     if (ret != ESP_OK) return ret;
 
     ret = vl53l3cx_write_dword(dev, VL53L3CX_REG_SYSTEM_INTERMEASUREMENT_PERIOD, 100);
     if (ret != ESP_OK) return ret;
 
     // ========================================
-    // Dynamic Configuration
+    // Dynamic Configuration (Updated to match official driver)
     // ========================================
     ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_GROUPED_PARAMETER_HOLD_0, 0x01);
     if (ret != ESP_OK) return ret;
@@ -263,16 +315,16 @@ esp_err_t vl53l3cx_set_preset_mode_medium_range(vl53l3cx_dev_t *dev)
     ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_SEED_CONFIG, 0x02);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SD_CONFIG_WOI_SD0, 0x0B);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SD_CONFIG_WOI_SD0, 0x05);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SD_CONFIG_WOI_SD1, 0x09);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SD_CONFIG_WOI_SD1, 0x07);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SD_CONFIG_INITIAL_PHASE_SD0, 0x0A);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SD_CONFIG_INITIAL_PHASE_SD0, 0x06);
     if (ret != ESP_OK) return ret;
 
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SD_CONFIG_INITIAL_PHASE_SD1, 0x0A);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SD_CONFIG_INITIAL_PHASE_SD1, 0x06);
     if (ret != ESP_OK) return ret;
 
     ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_GROUPED_PARAMETER_HOLD_1, 0x01);
@@ -338,24 +390,16 @@ esp_err_t vl53l3cx_init(vl53l3cx_dev_t *dev, i2c_master_bus_handle_t bus_handle,
         return ret;
     }
 
-    // Note: NVM calibration data is automatically loaded by firmware during boot.
-    // Manual NVM read is not required and can interfere with normal operation.
-
-    // Debug: Read NVM copy data from registers (loaded by firmware)
-    #define NVM_COPY_DATA_START_REG 0x010F
-    #define NVM_COPY_DATA_SIZE 49
-    uint8_t nvm_copy[NVM_COPY_DATA_SIZE];
-    ret = vl53l3cx_read_reg(dev, NVM_COPY_DATA_START_REG, nvm_copy, NVM_COPY_DATA_SIZE);
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "NVM copy data (first 16 bytes):");
-        ESP_LOG_BUFFER_HEX_LEVEL(TAG, nvm_copy, 16, ESP_LOG_INFO);
-        ESP_LOGI(TAG, "Model ID: 0x%02X, Module Type: 0x%02X, Revision: 0x%02X",
-                 nvm_copy[0], nvm_copy[1], nvm_copy[2]);
-    } else {
-        ESP_LOGW(TAG, "Failed to read NVM copy data from registers");
+    // Step 2: Read NVM calibration data from registers
+    // Note: The firmware automatically loads NVM data to registers during boot.
+    // We read this data for validation and future use.
+    ret = vl53l3cx_read_nvm_data(dev);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "NVM data read failed, but continuing initialization");
+        // Don't return error - this is not critical for basic operation
     }
 
-    // Step 2: Set MEDIUM_RANGE preset mode
+    // Step 3: Set MEDIUM_RANGE preset mode
     ret = vl53l3cx_set_preset_mode_medium_range(dev);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Preset mode configuration failed");
