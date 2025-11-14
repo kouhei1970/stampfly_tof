@@ -92,6 +92,13 @@ extern "C" {
 #define VL53L3CX_REG_FIRMWARE_ENABLE                    0x0401
 #define VL53L3CX_REG_POWER_MANAGEMENT_GO1_POWER_FORCE   0x0419
 
+// Patch Registers (for firmware patch loading)
+#define VL53L3CX_REG_PATCH__CTRL                        0x0470
+#define VL53L3CX_REG_PATCH__JMP_ENABLES                 0x0472
+#define VL53L3CX_REG_PATCH__DATA_ENABLES                0x0474
+#define VL53L3CX_REG_PATCH__OFFSET_0                    0x0476
+#define VL53L3CX_REG_PATCH__ADDRESS_0                   0x047E
+
 // NVM Control
 #define VL53L3CX_REG_RANGING_CORE_NVM_CTRL_PDN          0x01AC
 #define VL53L3CX_REG_RANGING_CORE_NVM_CTRL_MODE         0x01AD

@@ -469,6 +469,100 @@ esp_err_t vl53l3cx_set_device_address(vl53l3cx_dev_t *dev, uint8_t new_addr)
     return ESP_OK;
 }
 
+/**
+ * @brief Load firmware patch for ranging measurements
+ *
+ * This function must be called before starting measurements.
+ * Based on official VL53LX_load_patch() implementation.
+ */
+static esp_err_t vl53l3cx_load_patch(vl53l3cx_dev_t *dev)
+{
+    esp_err_t ret;
+    uint8_t buf[6];
+
+    ESP_LOGD(TAG, "Loading firmware patch...");
+
+    // Disable firmware
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_FIRMWARE_ENABLE, 0x00);
+    if (ret != ESP_OK) return ret;
+
+    // Enable power force
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_POWER_MANAGEMENT_GO1_POWER_FORCE, 0x01);
+    if (ret != ESP_OK) return ret;
+
+    // Write patch offsets (use default patch_power = 0x00)
+    buf[0] = 0x29;
+    buf[1] = 0xC9;
+    buf[2] = 0x0E;
+    buf[3] = 0x40;
+    buf[4] = 0x28;
+    buf[5] = 0x00;  // patch_power
+    ret = vl53l3cx_write_reg(dev, VL53L3CX_REG_PATCH__OFFSET_0, buf, 6);
+    if (ret != ESP_OK) return ret;
+
+    // Write patch addresses
+    buf[0] = 0x03;
+    buf[1] = 0x6D;
+    buf[2] = 0x03;
+    buf[3] = 0x6F;
+    buf[4] = 0x07;
+    buf[5] = 0x29;
+    ret = vl53l3cx_write_reg(dev, VL53L3CX_REG_PATCH__ADDRESS_0, buf, 6);
+    if (ret != ESP_OK) return ret;
+
+    // Write patch jump enables
+    buf[0] = 0x00;
+    buf[1] = 0x07;
+    ret = vl53l3cx_write_reg(dev, VL53L3CX_REG_PATCH__JMP_ENABLES, buf, 2);
+    if (ret != ESP_OK) return ret;
+
+    // Write patch data enables
+    buf[0] = 0x00;
+    buf[1] = 0x07;
+    ret = vl53l3cx_write_reg(dev, VL53L3CX_REG_PATCH__DATA_ENABLES, buf, 2);
+    if (ret != ESP_OK) return ret;
+
+    // Enable patch
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_PATCH__CTRL, 0x01);
+    if (ret != ESP_OK) return ret;
+
+    // Re-enable firmware
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_FIRMWARE_ENABLE, 0x01);
+    if (ret != ESP_OK) return ret;
+
+    ESP_LOGD(TAG, "Firmware patch loaded");
+    return ESP_OK;
+}
+
+/**
+ * @brief Unload firmware patch
+ */
+static esp_err_t vl53l3cx_unload_patch(vl53l3cx_dev_t *dev)
+{
+    esp_err_t ret;
+
+    ESP_LOGD(TAG, "Unloading firmware patch...");
+
+    // Disable firmware
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_FIRMWARE_ENABLE, 0x00);
+    if (ret != ESP_OK) return ret;
+
+    // Disable power force
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_POWER_MANAGEMENT_GO1_POWER_FORCE, 0x00);
+    if (ret != ESP_OK) return ret;
+
+    // Disable patch
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_PATCH__CTRL, 0x00);
+    if (ret != ESP_OK) return ret;
+
+    // Re-enable firmware
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_FIRMWARE_ENABLE, 0x01);
+    if (ret != ESP_OK) return ret;
+
+    ESP_LOGD(TAG, "Firmware patch unloaded");
+    return ESP_OK;
+}
+
 esp_err_t vl53l3cx_start_ranging(vl53l3cx_dev_t *dev)
 {
     if (dev == NULL) {
@@ -477,8 +571,15 @@ esp_err_t vl53l3cx_start_ranging(vl53l3cx_dev_t *dev)
 
     ESP_LOGI(TAG, "Starting continuous ranging...");
 
+    // Load firmware patch (required before starting measurement)
+    esp_err_t ret = vl53l3cx_load_patch(dev);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to load firmware patch");
+        return ret;
+    }
+
     // Re-confirm GPIO interrupt configuration
-    esp_err_t ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_INTERRUPT_CONFIG_GPIO, 0x20);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_INTERRUPT_CONFIG_GPIO, 0x20);
     if (ret != ESP_OK) return ret;
 
     // Clear interrupt
@@ -518,6 +619,13 @@ esp_err_t vl53l3cx_stop_ranging(vl53l3cx_dev_t *dev)
 
     ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_MODE_START, VL53L3CX_MODE_START_STOP);
     if (ret != ESP_OK) return ret;
+
+    // Unload firmware patch
+    ret = vl53l3cx_unload_patch(dev);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to unload firmware patch");
+        // Continue anyway
+    }
 
     // Clear interrupt
     ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_INTERRUPT_CLEAR, 0x01);
