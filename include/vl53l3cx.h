@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include "esp_err.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -151,8 +151,8 @@ extern "C" {
  */
 typedef struct {
     uint8_t i2c_addr;                   // I2C address (7-bit)
-    i2c_port_t i2c_port;                // I2C port number
-    uint16_t fast_osc_frequency;        // Fast oscillator frequency from NVM
+    i2c_master_bus_handle_t i2c_bus;    // I2C bus handle
+    i2c_master_dev_handle_t i2c_dev;    // I2C device handle
     bool measurement_active;            // Measurement state flag
 } vl53l3cx_dev_t;
 
@@ -169,23 +169,25 @@ typedef struct {
 } vl53l3cx_result_t;
 
 /**
- * @brief Initialize I2C master for VL53L3CX communication
+ * @brief Initialize I2C master bus for VL53L3CX communication
  *
+ * @param bus_handle Pointer to store the I2C bus handle
  * @param i2c_port I2C port number
  * @param sda_io SDA GPIO number
  * @param scl_io SCL GPIO number
  * @param clk_speed I2C clock speed in Hz (typically 400000)
  * @return ESP_OK on success
  */
-esp_err_t vl53l3cx_i2c_master_init(i2c_port_t i2c_port, int sda_io, int scl_io, uint32_t clk_speed);
+esp_err_t vl53l3cx_i2c_master_init(i2c_master_bus_handle_t *bus_handle, i2c_port_t i2c_port,
+                                   int sda_io, int scl_io, uint32_t clk_speed);
 
 /**
- * @brief Deinitialize I2C master
+ * @brief Deinitialize I2C master bus
  *
- * @param i2c_port I2C port number
+ * @param bus_handle I2C bus handle
  * @return ESP_OK on success
  */
-esp_err_t vl53l3cx_i2c_master_deinit(i2c_port_t i2c_port);
+esp_err_t vl53l3cx_i2c_master_deinit(i2c_master_bus_handle_t bus_handle);
 
 /**
  * @brief Wait for firmware boot completion
@@ -194,14 +196,6 @@ esp_err_t vl53l3cx_i2c_master_deinit(i2c_port_t i2c_port);
  * @return ESP_OK on success, ESP_ERR_TIMEOUT on timeout
  */
 esp_err_t vl53l3cx_wait_boot(vl53l3cx_dev_t *dev);
-
-/**
- * @brief Read NVM calibration data
- *
- * @param dev Device handle
- * @return ESP_OK on success
- */
-esp_err_t vl53l3cx_read_nvm_calibration_data(vl53l3cx_dev_t *dev);
 
 /**
  * @brief Set MEDIUM_RANGE preset mode
@@ -221,11 +215,11 @@ esp_err_t vl53l3cx_set_preset_mode_medium_range(vl53l3cx_dev_t *dev);
  * 4. Set MEDIUM_RANGE preset mode
  *
  * @param dev Device handle
- * @param i2c_port I2C port number
+ * @param bus_handle I2C bus handle
  * @param i2c_addr I2C address (7-bit), use VL53L3CX_DEFAULT_I2C_ADDR for default
  * @return ESP_OK on success
  */
-esp_err_t vl53l3cx_init(vl53l3cx_dev_t *dev, i2c_port_t i2c_port, uint8_t i2c_addr);
+esp_err_t vl53l3cx_init(vl53l3cx_dev_t *dev, i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr);
 
 /**
  * @brief Change I2C device address

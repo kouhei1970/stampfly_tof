@@ -104,16 +104,16 @@ esp_err_t stampfly_tof_init(stampfly_tof_handle_t *handle, i2c_port_t i2c_port)
 
     ESP_LOGI(TAG, "Initializing StampFly ToF system...");
 
-    handle->i2c_port = i2c_port;
     handle->initialized = false;
 
-    // Step 1: Initialize I2C master
-    esp_err_t ret = vl53l3cx_i2c_master_init(i2c_port,
+    // Step 1: Initialize I2C master bus
+    esp_err_t ret = vl53l3cx_i2c_master_init(&handle->i2c_bus,
+                                              i2c_port,
                                               STAMPFLY_TOF_I2C_SDA_PIN,
                                               STAMPFLY_TOF_I2C_SCL_PIN,
                                               STAMPFLY_TOF_I2C_FREQ_HZ);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2C initialization failed");
+        ESP_LOGE(TAG, "I2C bus initialization failed");
         return ret;
     }
 
@@ -145,7 +145,7 @@ esp_err_t stampfly_tof_init(stampfly_tof_handle_t *handle, i2c_port_t i2c_port)
     vTaskDelay(pdMS_TO_TICKS(10));  // Wait for sensor boot
 
     // Initialize with default address (0x29)
-    ret = vl53l3cx_init(&handle->front_sensor, i2c_port, VL53L3CX_DEFAULT_I2C_ADDR);
+    ret = vl53l3cx_init(&handle->front_sensor, handle->i2c_bus, VL53L3CX_DEFAULT_I2C_ADDR);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Front sensor initialization failed");
         return ret;
@@ -173,7 +173,7 @@ esp_err_t stampfly_tof_init(stampfly_tof_handle_t *handle, i2c_port_t i2c_port)
     vTaskDelay(pdMS_TO_TICKS(10));
 
     // Initialize with default address (0x29)
-    ret = vl53l3cx_init(&handle->bottom_sensor, i2c_port, VL53L3CX_DEFAULT_I2C_ADDR);
+    ret = vl53l3cx_init(&handle->bottom_sensor, handle->i2c_bus, VL53L3CX_DEFAULT_I2C_ADDR);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Bottom sensor initialization failed");
         return ret;
@@ -210,10 +210,10 @@ esp_err_t stampfly_tof_deinit(stampfly_tof_handle_t *handle)
     // Shutdown all sensors
     stampfly_tof_set_xshut(STAMPFLY_TOF_SENSOR_BOTH, 0);
 
-    // Deinitialize I2C
-    esp_err_t ret = vl53l3cx_i2c_master_deinit(handle->i2c_port);
+    // Deinitialize I2C bus
+    esp_err_t ret = vl53l3cx_i2c_master_deinit(handle->i2c_bus);
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "I2C deinitialization failed");
+        ESP_LOGW(TAG, "I2C bus deinitialization failed");
     }
 
     handle->initialized = false;

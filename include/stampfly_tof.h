@@ -68,7 +68,7 @@ typedef void (*stampfly_tof_interrupt_callback_t)(stampfly_tof_handle_t *handle,
 struct stampfly_tof_handle_s {
     vl53l3cx_dev_t front_sensor;        // Front sensor device
     vl53l3cx_dev_t bottom_sensor;       // Bottom sensor device
-    i2c_port_t i2c_port;                // I2C port number
+    i2c_master_bus_handle_t i2c_bus;    // I2C bus handle
     bool initialized;                   // Initialization state
     stampfly_tof_interrupt_callback_t front_callback;   // Front sensor callback
     stampfly_tof_interrupt_callback_t bottom_callback;  // Bottom sensor callback

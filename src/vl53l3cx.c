@@ -34,16 +34,7 @@ static esp_err_t vl53l3cx_write_reg(vl53l3cx_dev_t *dev, uint16_t reg_addr,
     write_buf[1] = reg_addr & 0xFF;         // LSB
     memcpy(&write_buf[2], data, len);
 
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (dev->i2c_addr << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write(cmd, write_buf, len + 2, true);
-    i2c_master_stop(cmd);
-
-    esp_err_t ret = i2c_master_cmd_begin(dev->i2c_port, cmd, pdMS_TO_TICKS(100));
-    i2c_cmd_link_delete(cmd);
-
-    return ret;
+    return i2c_master_transmit(dev->i2c_dev, write_buf, len + 2, 100);
 }
 
 /**
@@ -60,22 +51,7 @@ static esp_err_t vl53l3cx_read_reg(vl53l3cx_dev_t *dev, uint16_t reg_addr,
     addr_buf[0] = (reg_addr >> 8) & 0xFF;
     addr_buf[1] = reg_addr & 0xFF;
 
-    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-    i2c_master_start(cmd);
-    i2c_master_write_byte(cmd, (dev->i2c_addr << 1) | I2C_MASTER_WRITE, true);
-    i2c_master_write(cmd, addr_buf, 2, true);
-    i2c_master_start(cmd);  // Repeated start
-    i2c_master_write_byte(cmd, (dev->i2c_addr << 1) | I2C_MASTER_READ, true);
-    if (len > 1) {
-        i2c_master_read(cmd, data, len - 1, I2C_MASTER_ACK);
-    }
-    i2c_master_read_byte(cmd, data + len - 1, I2C_MASTER_NACK);
-    i2c_master_stop(cmd);
-
-    esp_err_t ret = i2c_master_cmd_begin(dev->i2c_port, cmd, pdMS_TO_TICKS(100));
-    i2c_cmd_link_delete(cmd);
-
-    return ret;
+    return i2c_master_transmit_receive(dev->i2c_dev, addr_buf, 2, data, len, 100);
 }
 
 /**
@@ -122,37 +98,39 @@ static esp_err_t vl53l3cx_read_byte(vl53l3cx_dev_t *dev, uint16_t reg_addr, uint
 // Public API Implementation
 // ============================================================================
 
-esp_err_t vl53l3cx_i2c_master_init(i2c_port_t i2c_port, int sda_io, int scl_io, uint32_t clk_speed)
+esp_err_t vl53l3cx_i2c_master_init(i2c_master_bus_handle_t *bus_handle, i2c_port_t i2c_port,
+                                   int sda_io, int scl_io, uint32_t clk_speed)
 {
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = sda_io,
+    if (bus_handle == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    i2c_master_bus_config_t bus_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = i2c_port,
         .scl_io_num = scl_io,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = clk_speed,
+        .sda_io_num = sda_io,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
     };
 
-    esp_err_t ret = i2c_param_config(i2c_port, &conf);
+    esp_err_t ret = i2c_new_master_bus(&bus_config, bus_handle);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2C param config failed");
+        ESP_LOGE(TAG, "I2C master bus creation failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ret = i2c_driver_install(i2c_port, conf.mode, 0, 0, 0);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "I2C driver install failed");
-        return ret;
-    }
-
-    ESP_LOGI(TAG, "I2C master initialized on port %d (SDA=%d, SCL=%d, %lu Hz)",
+    ESP_LOGI(TAG, "I2C master bus initialized on port %d (SDA=%d, SCL=%d, %lu Hz)",
              i2c_port, sda_io, scl_io, clk_speed);
     return ESP_OK;
 }
 
-esp_err_t vl53l3cx_i2c_master_deinit(i2c_port_t i2c_port)
+esp_err_t vl53l3cx_i2c_master_deinit(i2c_master_bus_handle_t bus_handle)
 {
-    return i2c_driver_delete(i2c_port);
+    if (bus_handle == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return i2c_del_master_bus(bus_handle);
 }
 
 esp_err_t vl53l3cx_wait_boot(vl53l3cx_dev_t *dev)
@@ -180,69 +158,6 @@ esp_err_t vl53l3cx_wait_boot(vl53l3cx_dev_t *dev)
     } while ((boot_status & 0x01) == 0);
 
     ESP_LOGI(TAG, "Firmware boot complete");
-    return ESP_OK;
-}
-
-esp_err_t vl53l3cx_read_nvm_calibration_data(vl53l3cx_dev_t *dev)
-{
-    esp_err_t ret;
-
-    ESP_LOGI(TAG, "Reading NVM calibration data...");
-
-    // Step 1: Disable firmware
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_FIRMWARE_ENABLE, 0x00);
-    if (ret != ESP_OK) return ret;
-
-    // Step 2: Enable power force
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_POWER_MANAGEMENT_GO1_POWER_FORCE, 0x01);
-    if (ret != ESP_OK) return ret;
-    DELAY_US(250);  // Power stabilization
-
-    // Step 3: NVM power down release
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGING_CORE_NVM_CTRL_PDN, 0x01);
-    if (ret != ESP_OK) return ret;
-
-    // Step 4: Enable NVM clock
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGING_CORE_CLK_CTRL1, 0x05);
-    if (ret != ESP_OK) return ret;
-    DELAY_US(5000);  // NVM power-up wait (5ms)
-
-    // Step 5: Set NVM mode to read
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGING_CORE_NVM_CTRL_MODE, 0x01);
-    if (ret != ESP_OK) return ret;
-
-    // Step 6: Set NVM pulse width
-    ret = vl53l3cx_write_word(dev, VL53L3CX_REG_RANGING_CORE_NVM_CTRL_PULSE_WIDTH_MSB, 0x0004);
-    if (ret != ESP_OK) return ret;
-
-    // Step 7: Read fast oscillator frequency (NVM address 0x1C)
-    uint8_t nvm_addr = 0x1C;
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGING_CORE_NVM_CTRL_ADDR, nvm_addr);
-    if (ret != ESP_OK) return ret;
-
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGING_CORE_NVM_CTRL_READN, 0x00);
-    if (ret != ESP_OK) return ret;
-    DELAY_US(5);  // Read trigger delay
-
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_RANGING_CORE_NVM_CTRL_READN, 0x01);
-    if (ret != ESP_OK) return ret;
-
-    uint8_t nvm_data[4];
-    ret = vl53l3cx_read_reg(dev, VL53L3CX_REG_RANGING_CORE_NVM_CTRL_DATAOUT_MMM, nvm_data, 4);
-    if (ret != ESP_OK) return ret;
-
-    // Extract 16-bit fast oscillator frequency (big-endian)
-    dev->fast_osc_frequency = ((uint16_t)nvm_data[0] << 8) | nvm_data[1];
-
-    // Step 8: Cleanup - disable power force
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_POWER_MANAGEMENT_GO1_POWER_FORCE, 0x00);
-    if (ret != ESP_OK) return ret;
-
-    // Step 9: Re-enable firmware
-    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_FIRMWARE_ENABLE, 0x01);
-    if (ret != ESP_OK) return ret;
-
-    ESP_LOGI(TAG, "NVM calibration data read complete (OSC freq: %d)", dev->fast_osc_frequency);
     return ESP_OK;
 }
 
@@ -391,33 +306,56 @@ esp_err_t vl53l3cx_set_preset_mode_medium_range(vl53l3cx_dev_t *dev)
     return ESP_OK;
 }
 
-esp_err_t vl53l3cx_init(vl53l3cx_dev_t *dev, i2c_port_t i2c_port, uint8_t i2c_addr)
+esp_err_t vl53l3cx_init(vl53l3cx_dev_t *dev, i2c_master_bus_handle_t bus_handle, uint8_t i2c_addr)
 {
-    if (dev == NULL) {
+    if (dev == NULL || bus_handle == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    dev->i2c_port = i2c_port;
     dev->i2c_addr = i2c_addr;
+    dev->i2c_bus = bus_handle;
     dev->measurement_active = false;
 
     ESP_LOGI(TAG, "Initializing VL53L3CX at address 0x%02X", i2c_addr);
 
+    // Add device to I2C bus
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = i2c_addr,
+        .scl_speed_hz = 400000,
+    };
+
+    esp_err_t ret = i2c_master_bus_add_device(bus_handle, &dev_cfg, &dev->i2c_dev);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add device to I2C bus: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
     // Step 1: Wait for firmware boot
-    esp_err_t ret = vl53l3cx_wait_boot(dev);
+    ret = vl53l3cx_wait_boot(dev);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Firmware boot failed");
         return ret;
     }
 
-    // Step 2: Read NVM calibration data
-    ret = vl53l3cx_read_nvm_calibration_data(dev);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "NVM calibration read failed");
-        return ret;
+    // Note: NVM calibration data is automatically loaded by firmware during boot.
+    // Manual NVM read is not required and can interfere with normal operation.
+
+    // Debug: Read NVM copy data from registers (loaded by firmware)
+    #define NVM_COPY_DATA_START_REG 0x010F
+    #define NVM_COPY_DATA_SIZE 49
+    uint8_t nvm_copy[NVM_COPY_DATA_SIZE];
+    ret = vl53l3cx_read_reg(dev, NVM_COPY_DATA_START_REG, nvm_copy, NVM_COPY_DATA_SIZE);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "NVM copy data (first 16 bytes):");
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, nvm_copy, 16, ESP_LOG_INFO);
+        ESP_LOGI(TAG, "Model ID: 0x%02X, Module Type: 0x%02X, Revision: 0x%02X",
+                 nvm_copy[0], nvm_copy[1], nvm_copy[2]);
+    } else {
+        ESP_LOGW(TAG, "Failed to read NVM copy data from registers");
     }
 
-    // Step 3: Set MEDIUM_RANGE preset mode
+    // Step 2: Set MEDIUM_RANGE preset mode
     ret = vl53l3cx_set_preset_mode_medium_range(dev);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Preset mode configuration failed");
@@ -441,14 +379,35 @@ esp_err_t vl53l3cx_set_device_address(vl53l3cx_dev_t *dev, uint8_t new_addr)
 
     ESP_LOGI(TAG, "Changing I2C address: 0x%02X -> 0x%02X", dev->i2c_addr, new_addr);
 
+    // Write new address to sensor register
     uint8_t addr_value = new_addr & 0x7F;
     esp_err_t ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_I2C_SLAVE_DEVICE_ADDRESS, addr_value);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to write new I2C address");
+        ESP_LOGE(TAG, "Failed to write new I2C address to sensor");
         return ret;
     }
 
-    // Update device handle with new address
+    // Remove old device handle from bus
+    ret = i2c_master_bus_rm_device(dev->i2c_dev);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to remove old device from bus: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Add device back with new address
+    i2c_device_config_t dev_cfg = {
+        .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+        .device_address = new_addr,
+        .scl_speed_hz = 400000,
+    };
+
+    ret = i2c_master_bus_add_device(dev->i2c_bus, &dev_cfg, &dev->i2c_dev);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add device with new address: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    // Update device structure with new address
     dev->i2c_addr = new_addr;
 
     ESP_LOGI(TAG, "I2C address changed successfully");
@@ -463,8 +422,12 @@ esp_err_t vl53l3cx_start_ranging(vl53l3cx_dev_t *dev)
 
     ESP_LOGI(TAG, "Starting continuous ranging...");
 
+    // Re-confirm GPIO interrupt configuration
+    esp_err_t ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_INTERRUPT_CONFIG_GPIO, 0x20);
+    if (ret != ESP_OK) return ret;
+
     // Clear interrupt
-    esp_err_t ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_INTERRUPT_CLEAR, 0x01);
+    ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_SYSTEM_INTERRUPT_CLEAR, 0x01);
     if (ret != ESP_OK) return ret;
 
     // Start BACKTOBACK mode (continuous ranging)
@@ -474,8 +437,15 @@ esp_err_t vl53l3cx_start_ranging(vl53l3cx_dev_t *dev)
         return ret;
     }
 
+    // Debug: Verify mode was set and check initial status
+    uint8_t mode_check, int_status, range_status;
+    vl53l3cx_read_byte(dev, VL53L3CX_REG_SYSTEM_MODE_START, &mode_check);
+    vl53l3cx_read_byte(dev, VL53L3CX_REG_RESULT_INTERRUPT_STATUS, &int_status);
+    vl53l3cx_read_byte(dev, VL53L3CX_REG_RESULT_INTERRUPT_STATUS + 1, &range_status);
+    ESP_LOGI(TAG, "Ranging started (mode=0x%02X, int_status=0x%02X, range_status=0x%02X)",
+             mode_check, int_status, range_status);
+
     dev->measurement_active = true;
-    ESP_LOGI(TAG, "Ranging started");
     return ESP_OK;
 }
 
@@ -519,13 +489,21 @@ esp_err_t vl53l3cx_wait_data_ready(vl53l3cx_dev_t *dev, uint32_t timeout_ms)
         }
 
         if ((MILLIS() - start_time) > timeout_ms) {
-            ESP_LOGW(TAG, "Data ready timeout");
+            // Read range status for debugging
+            uint8_t range_status = 0;
+            vl53l3cx_read_byte(dev, VL53L3CX_REG_RESULT_INTERRUPT_STATUS + 1, &range_status);
+            ESP_LOGW(TAG, "Data ready timeout (int_status=0x%02X, range_status=0x%02X)",
+                     int_status, range_status);
+            ESP_LOGW(TAG, "int_status bits: ERROR=%d, RANGE_COMPLETE=%d, NEW_DATA_READY=%d",
+                     (int_status >> 4) & 1, (int_status >> 3) & 1, (int_status >> 5) & 1);
             return ESP_ERR_TIMEOUT;
         }
 
         DELAY_MS(VL53L3CX_POLL_INTERVAL_MS);
 
     } while ((int_status & 0x20) == 0);  // bit 5: NEW_DATA_READY
+
+    ESP_LOGD(TAG, "Data ready detected (int_status=0x%02X)", int_status);
 
     return ESP_OK;
 }
