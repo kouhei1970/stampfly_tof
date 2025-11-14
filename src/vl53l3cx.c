@@ -423,13 +423,16 @@ esp_err_t vl53l3cx_set_device_address(vl53l3cx_dev_t *dev, uint8_t new_addr)
 
     ESP_LOGI(TAG, "Changing I2C address: 0x%02X -> 0x%02X", dev->i2c_addr, new_addr);
 
-    // Write new address to sensor register
+    // Write new address to sensor register (using old address)
     uint8_t addr_value = new_addr & 0x7F;
     esp_err_t ret = vl53l3cx_write_byte(dev, VL53L3CX_REG_I2C_SLAVE_DEVICE_ADDRESS, addr_value);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to write new I2C address to sensor");
         return ret;
     }
+
+    // Wait for sensor to apply new address
+    DELAY_MS(10);
 
     // Remove old device handle from bus
     ret = i2c_master_bus_rm_device(dev->i2c_dev);
@@ -454,7 +457,15 @@ esp_err_t vl53l3cx_set_device_address(vl53l3cx_dev_t *dev, uint8_t new_addr)
     // Update device structure with new address
     dev->i2c_addr = new_addr;
 
-    ESP_LOGI(TAG, "I2C address changed successfully");
+    // Verify communication with new address
+    uint8_t test_read;
+    ret = vl53l3cx_read_byte(dev, VL53L3CX_REG_FIRMWARE_SYSTEM_STATUS, &test_read);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to communicate with sensor at new address 0x%02X", new_addr);
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "I2C address changed successfully (verified: status=0x%02X)", test_read);
     return ESP_OK;
 }
 
