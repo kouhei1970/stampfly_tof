@@ -142,14 +142,24 @@ Device found at address 0x29
 **ビルドテスト**: ✅ 成功
 **実機テスト**: ✅ 成功
 
-### 🔲 Stage 3: デバイス初期化（未実装）
+### ✅ Stage 3: デバイス初期化
 
 **目的**: VL53LX API初期化シーケンス確認
 
 **内容**:
-- VL53LXドライバコア実装
-- デバイス初期化
-- デバイス情報取得
+- VL53LXドライバコア実装 (BareDriver 1.2.14)
+- デバイスブート待機 (VL53LX_WaitDeviceBooted)
+- デバイス初期化 (VL53LX_DataInit)
+- デバイス情報取得 (VL53LX_GetDeviceInfo)
+
+**期待結果**:
+- デバイスが正常にブート
+- Product Type = 0xAA (VL53L3CX)
+- 初期化完了
+
+**詳細**: [examples/stage3_device_init/README.md](examples/stage3_device_init/README.md)
+
+**ビルドテスト**: ✅ 成功
 
 ### 🔲 Stage 4: ポーリング測定（未実装）
 
