@@ -125,7 +125,7 @@ Device found at address 0x29
 
 **ビルドテスト**: ✅ 成功
 
-### 🔲 Stage 2: レジスタ読み書きテスト（未実装）
+### ✅ Stage 2: レジスタ読み書きテスト
 
 **目的**: VL53L3CXレジスタへの直接アクセス確認
 
@@ -134,8 +134,13 @@ Device found at address 0x29
 - Model ID / Module Type レジスタ読み出し
 
 **期待結果**:
-- Model ID = 0xEA
-- Module Type = 0xCC
+- Model ID = 0xEA (VL53L3CX識別子)
+- Module Type = 0xAA (VL53L3CX固有の値、注: 0xCCはVL53L1)
+
+**詳細**: [examples/stage2_register_test/README.md](examples/stage2_register_test/README.md)
+
+**ビルドテスト**: ✅ 成功
+**実機テスト**: ✅ 成功
 
 ### 🔲 Stage 3: デバイス初期化（未実装）
 
