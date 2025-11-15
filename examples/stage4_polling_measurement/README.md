@@ -49,8 +49,8 @@ Stage 4: Polling Distance Measurement
 VL53L3CX ToF Sensor
 ==================================
 XSHUT pins initialized
-Front ToF (GPIO9): ENABLED
-Bottom ToF (GPIO7): DISABLED
+Bottom ToF (GPIO7): ENABLED [DEFAULT - USB powered]
+Front ToF (GPIO9): DISABLED (requires battery)
 I2C master initialized successfully
 SDA: GPIO3, SCL: GPIO4
 Initializing VL53L3CX sensor...
@@ -124,8 +124,25 @@ typedef struct {
 
 - **I2C SDA**: GPIO3
 - **I2C SCL**: GPIO4
-- **Front ToF XSHUT**: GPIO9 (HIGH: 有効)
-- **Bottom ToF XSHUT**: GPIO7 (LOW: 無効)
+- **Bottom ToF XSHUT**: GPIO7 (HIGH: 有効) **[デフォルト - USB給電で動作]**
+- **Front ToF XSHUT**: GPIO9 (LOW: 無効、バッテリー必要)
+
+### 重要：電源要件
+
+**⚠️ センサー別の電源供給の違いに注意**
+
+- **Bottom ToF (底面センサー)**: USB給電で動作 **[デフォルトテスト対象]**
+  - 書き込み用USBケーブルからの電源で動作します
+  - バッテリー不要でテスト可能
+
+- **Front ToF (前面センサー)**: バッテリー電源が必要
+  - USB給電のみでは動作しません
+  - バッテリーを接続してください
+  - バッテリー未接続時は、わずかな電圧でロジックが部分的に動作し、I2C通信は成功するが測定は失敗する現象が発生します
+
+**推奨テスト手順:**
+1. まず Bottom ToF (GPIO7) でテスト（USB給電のみで動作）**← デフォルト設定**
+2. Front ToF (GPIO9) をテストする場合はバッテリーを接続
 
 ## ビルド方法
 

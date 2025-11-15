@@ -10,8 +10,10 @@
  * Hardware Setup:
  * - I2C SDA: GPIO3
  * - I2C SCL: GPIO4
- * - Front ToF XSHUT: GPIO9 (set HIGH to enable sensor)
- * - Bottom ToF XSHUT: GPIO7 (set LOW to disable sensor)
+ * - Bottom ToF XSHUT: GPIO7 (set HIGH to enable sensor) [DEFAULT]
+ * - Front ToF XSHUT: GPIO9 (set LOW to disable sensor)
+ *
+ * Note: Bottom ToF works with USB power only. Front ToF requires battery.
  */
 
 #include <stdio.h>
@@ -78,13 +80,13 @@ static void tof_xshut_init(void)
     };
     gpio_config(&io_conf);
 
-    // Enable front sensor, disable bottom sensor
-    gpio_set_level(STAMPFLY_TOF_FRONT_XSHUT, 1);
-    gpio_set_level(STAMPFLY_TOF_BOTTOM_XSHUT, 0);
+    // Enable bottom sensor (USB powered), disable front sensor (requires battery)
+    gpio_set_level(STAMPFLY_TOF_FRONT_XSHUT, 0);
+    gpio_set_level(STAMPFLY_TOF_BOTTOM_XSHUT, 1);
 
     ESP_LOGI(TAG, "XSHUT pins initialized");
-    ESP_LOGI(TAG, "Front ToF (GPIO%d): ENABLED", STAMPFLY_TOF_FRONT_XSHUT);
-    ESP_LOGI(TAG, "Bottom ToF (GPIO%d): DISABLED", STAMPFLY_TOF_BOTTOM_XSHUT);
+    ESP_LOGI(TAG, "Bottom ToF (GPIO%d): ENABLED [DEFAULT - USB powered]", STAMPFLY_TOF_BOTTOM_XSHUT);
+    ESP_LOGI(TAG, "Front ToF (GPIO%d): DISABLED (requires battery)", STAMPFLY_TOF_FRONT_XSHUT);
 
     // Wait for sensor to boot
     vTaskDelay(pdMS_TO_TICKS(10));
@@ -184,48 +186,47 @@ static void perform_measurements(void)
         return;
     }
 
+    // Polling loop
     while (measurement_count < MEASUREMENT_COUNT) {
-        // Poll for data ready
-        data_ready = 0;
-        while (!data_ready) {
-            status = VL53LX_GetMeasurementDataReady(&vl53lx_dev, &data_ready);
+        // Check if measurement data is ready
+        status = VL53LX_GetMeasurementDataReady(&vl53lx_dev, &data_ready);
+        if (status != VL53LX_ERROR_NONE) {
+            ESP_LOGE(TAG, "GetMeasurementDataReady failed (status: %d)", status);
+            return;
+        }
+
+        if (data_ready) {
+            // Get multi-ranging measurement data
+            status = VL53LX_GetMultiRangingData(&vl53lx_dev, &multi_ranging_data);
             if (status != VL53LX_ERROR_NONE) {
-                ESP_LOGE(TAG, "Get data ready failed (status: %d)", status);
+                ESP_LOGE(TAG, "Get multi-ranging data failed (status: %d)", status);
                 return;
             }
-            vTaskDelay(pdMS_TO_TICKS(1));  // Small delay to avoid excessive polling
+
+            measurement_count++;
+
+            // Display measurement results
+            if (multi_ranging_data.NumberOfObjectsFound > 0) {
+                VL53LX_TargetRangeData_t *target = &multi_ranging_data.RangeData[0];
+                ESP_LOGI(TAG, "[%02d] Distance: %4d mm | Status: %d | Signal: %.2f Mcps",
+                         (int)measurement_count,
+                         (int)target->RangeMilliMeter,
+                         (int)target->RangeStatus,
+                         target->SignalRateRtnMegaCps / 65536.0);
+            } else {
+                ESP_LOGI(TAG, "[%02d] No objects detected",
+                         (int)measurement_count);
+            }
+
+            // Clear interrupt and start next measurement
+            status = VL53LX_ClearInterruptAndStartMeasurement(&vl53lx_dev);
+            if (status != VL53LX_ERROR_NONE) {
+                ESP_LOGE(TAG, "ClearInterruptAndStartMeasurement failed (status: %d)", status);
+                return;
+            }
         }
 
-        // Get multi-ranging measurement data
-        status = VL53LX_GetMultiRangingData(&vl53lx_dev, &multi_ranging_data);
-        if (status != VL53LX_ERROR_NONE) {
-            ESP_LOGE(TAG, "Get multi-ranging data failed (status: %d)", status);
-            return;
-        }
-
-        measurement_count++;
-
-        // Display measurement results for the first object
-        if (multi_ranging_data.NumberOfObjectsFound > 0) {
-            VL53LX_TargetRangeData_t *target = &multi_ranging_data.RangeData[0];
-            ESP_LOGI(TAG, "[%02d] Distance: %4d mm | Status: %d | Objects: %d",
-                     (int)measurement_count,
-                     (int)target->RangeMilliMeter,
-                     (int)target->RangeStatus,
-                     (int)multi_ranging_data.NumberOfObjectsFound);
-        } else {
-            ESP_LOGI(TAG, "[%02d] No objects detected", (int)measurement_count);
-        }
-
-        // Clear interrupt and start next measurement
-        status = VL53LX_ClearInterruptAndStartMeasurement(&vl53lx_dev);
-        if (status != VL53LX_ERROR_NONE) {
-            ESP_LOGE(TAG, "Clear interrupt failed (status: %d)", status);
-            return;
-        }
-
-        // Wait 1 second before next measurement
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        vTaskDelay(pdMS_TO_TICKS(1));  // 1ms polling interval
     }
 
     // Stop measurement
@@ -274,12 +275,14 @@ void app_main(void)
     }
 
     // Configure measurement parameters
-    status = configure_measurement();
-    if (status != VL53LX_ERROR_NONE) {
-        ESP_LOGE(TAG, "Measurement configuration failed!");
-        VL53LX_PlatformDeinit(&vl53lx_dev);
-        return;
-    }
+    // TEMPORARILY DISABLED: Testing with default settings like ST sample
+    // status = configure_measurement();
+    // if (status != VL53LX_ERROR_NONE) {
+    //     ESP_LOGE(TAG, "Measurement configuration failed!");
+    //     VL53LX_PlatformDeinit(&vl53lx_dev);
+    //     return;
+    // }
+    ESP_LOGI(TAG, "Using default measurement parameters (no configuration)");
 
     // Perform measurements
     perform_measurements();
