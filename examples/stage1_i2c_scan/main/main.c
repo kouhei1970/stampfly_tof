@@ -29,13 +29,18 @@ static i2c_master_bus_handle_t i2c_bus_handle = NULL;
  */
 static esp_err_t i2c_master_init(void)
 {
+    // I2C master bus configuration (all fields explicitly initialized)
     i2c_master_bus_config_t bus_config = {
         .clk_source = I2C_CLK_SRC_DEFAULT,
         .i2c_port = STAMPFLY_I2C_PORT,
         .scl_io_num = STAMPFLY_I2C_SCL_GPIO,
         .sda_io_num = STAMPFLY_I2C_SDA_GPIO,
         .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
+        .intr_priority = 0,        // Auto-select interrupt priority
+        .trans_queue_depth = 0,    // No queue needed for synchronous operations
+        .flags = {
+            .enable_internal_pullup = true,
+        },
     };
 
     esp_err_t err = i2c_new_master_bus(&bus_config, &i2c_bus_handle);
@@ -45,8 +50,8 @@ static esp_err_t i2c_master_init(void)
     }
 
     ESP_LOGI(TAG, "I2C master initialized successfully");
-    ESP_LOGI(TAG, "SDA: GPIO%d, SCL: GPIO%d, Freq: %d Hz",
-             STAMPFLY_I2C_SDA_GPIO, STAMPFLY_I2C_SCL_GPIO, STAMPFLY_I2C_FREQ_HZ);
+    ESP_LOGI(TAG, "SDA: GPIO%d, SCL: GPIO%d",
+             STAMPFLY_I2C_SDA_GPIO, STAMPFLY_I2C_SCL_GPIO);
 
     return ESP_OK;
 }
@@ -90,43 +95,37 @@ static void i2c_scan(void)
     int devices_found = 0;
 
     for (uint8_t addr = 0x03; addr < 0x78; addr++) {
-        // Add device temporarily to probe
-        i2c_device_config_t dev_cfg = {
-            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
-            .device_address = addr,
-            .scl_speed_hz = STAMPFLY_I2C_FREQ_HZ,
-        };
-
-        i2c_master_dev_handle_t dev_handle;
-        esp_err_t ret = i2c_master_bus_add_device(i2c_bus_handle, &dev_cfg, &dev_handle);
+        // Probe the device directly
+        // Note: timeout parameter is in milliseconds (not ticks)
+        // i2c_master_probe() internally calls pdMS_TO_TICKS()
+        esp_err_t ret = i2c_master_probe(i2c_bus_handle, addr, 50);
 
         if (ret == ESP_OK) {
-            // Try to probe the device
-            ret = i2c_master_probe(i2c_bus_handle, addr, pdMS_TO_TICKS(50));
+            ESP_LOGI(TAG, "Device found at address 0x%02X", addr);
+            devices_found++;
 
-            if (ret == ESP_OK) {
-                ESP_LOGI(TAG, "Device found at address 0x%02X", addr);
-                devices_found++;
-
-                // Check if it's the expected VL53L3CX address
-                if (addr == VL53L3CX_DEFAULT_I2C_ADDR) {
-                    ESP_LOGI(TAG, "  -> VL53L3CX detected at default address!");
-                }
+            // Check if it's the expected VL53L3CX address
+            if (addr == VL53L3CX_DEFAULT_I2C_ADDR) {
+                ESP_LOGI(TAG, "  -> VL53L3CX detected at default address!");
             }
-
-            // Remove the device after probing
-            i2c_master_bus_rm_device(dev_handle);
+        } else if (ret == ESP_ERR_TIMEOUT) {
+            // Timeout indicates bus busy or pull-up resistor issues
+            ESP_LOGW(TAG, "Timeout at address 0x%02X - check pull-ups", addr);
+            break;  // Stop scanning if timeout occurs
         }
+        // ESP_ERR_NOT_FOUND (NACK) is normal and silent
     }
 
     ESP_LOGI(TAG, "I2C scan completed. Devices found: %d", devices_found);
 
     if (devices_found == 0) {
         ESP_LOGW(TAG, "No I2C devices found! Please check:");
-        ESP_LOGW(TAG, "  - I2C wiring (SDA, SCL)");
-        ESP_LOGW(TAG, "  - Pull-up resistors");
+        ESP_LOGW(TAG, "  - I2C wiring (SDA=GPIO%d, SCL=GPIO%d)",
+                 STAMPFLY_I2C_SDA_GPIO, STAMPFLY_I2C_SCL_GPIO);
+        ESP_LOGW(TAG, "  - Pull-up resistors (2-5kΩ recommended)");
         ESP_LOGW(TAG, "  - Sensor power supply");
-        ESP_LOGW(TAG, "  - XSHUT pin levels");
+        ESP_LOGW(TAG, "  - XSHUT pin levels (Front=GPIO%d, Bottom=GPIO%d)",
+                 STAMPFLY_TOF_FRONT_XSHUT, STAMPFLY_TOF_BOTTOM_XSHUT);
     }
 }
 
