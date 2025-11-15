@@ -162,14 +162,25 @@ Device found at address 0x29
 **ビルドテスト**: ✅ 成功
 **実機テスト**: ✅ 成功 (Product Type: 0xAA, Rev 1.1)
 
-### 🔲 Stage 4: ポーリング測定（未実装）
+### ✅ Stage 4: ポーリング測定
 
 **目的**: 基本的な距離測定（タイミングバジェット33ms）
 
 **内容**:
-- 測定開始
+- 測定パラメータ設定（Distance Mode: MEDIUM, Timing Budget: 33ms）
+- VL53LX Multi-Ranging API使用
 - ポーリングによるデータ取得
-- 距離表示
+- 複数オブジェクト検出サポート
+- 1秒間隔で20回測定
+
+**期待結果**:
+- 距離データ取得成功（mm単位）
+- RangeStatus = 0（有効な測定）
+- 検出オブジェクト数表示
+
+**詳細**: [examples/stage4_polling_measurement/README.md](examples/stage4_polling_measurement/README.md)
+
+**ビルドテスト**: ✅ 成功
 
 ### 🔲 Stage 5: 割り込み測定（未実装）
 
