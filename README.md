@@ -160,6 +160,7 @@ Device found at address 0x29
 **詳細**: [examples/stage3_device_init/README.md](examples/stage3_device_init/README.md)
 
 **ビルドテスト**: ✅ 成功
+**実機テスト**: ✅ 成功 (Product Type: 0xAA, Rev 1.1)
 
 ### 🔲 Stage 4: ポーリング測定（未実装）
 
