@@ -212,7 +212,11 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
     }
 
     // Check rate of change if enabled and filter has previous output
-    if (filter->config.enable_rate_limit && filter->count > 0) {
+    bool has_previous_output = (filter->config.filter_type == VL53LX_FILTER_KALMAN)
+                               ? filter->kalman_initialized
+                               : (filter->count > 0);
+
+    if (filter->config.enable_rate_limit && has_previous_output) {
         int32_t change = (int32_t)distance_mm - (int32_t)filter->last_output;
         if (abs(change) > filter->config.max_change_rate_mm) {
             // Change too large, reject sample
