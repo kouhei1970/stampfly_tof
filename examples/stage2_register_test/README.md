@@ -15,9 +15,11 @@ VL53LXプラットフォーム層（I2C読み書き関数）の動作確認を�
 
 ```
 Model ID (0x010F): 0xEA [OK]
-Module Type (0x0110): 0xCC [OK]
+Module Type (0x0110): 0xCC [OK - Variant 1] または 0xAA [OK - Variant 2]
 Mask Revision (0x0111): 0x?? (informational)
 ```
+
+**注意**: VL53L3CXセンサーには複数のバリエーションが存在し、Module Typeが異なる場合があります（0xCCまたは0xAA）。いずれも正常な値です。
 
 ## 使用方法
 
@@ -66,7 +68,7 @@ idf.py flash monitor
 | レジスタ名 | アドレス | 期待値 | 説明 |
 |-----------|---------|--------|------|
 | Model ID | 0x010F | 0xEA | デバイスモデル識別子 |
-| Module Type | 0x0110 | 0xCC | モジュールタイプ識別子 |
+| Module Type | 0x0110 | 0xCC / 0xAA | モジュールタイプ識別子（バリアント依存） |
 | Mask Revision | 0x0111 | - | マスクリビジョン（参考情報） |
 
 ## トラブルシューティング

@@ -37,7 +37,8 @@ static VL53LX_Dev_t vl53lx_dev;
 
 // Expected values
 #define VL53L3CX_MODEL_ID_EXPECTED      0xEA
-#define VL53L3CX_MODULE_TYPE_EXPECTED   0xCC
+#define VL53L3CX_MODULE_TYPE_EXPECTED_V1 0xCC  // Variant 1
+#define VL53L3CX_MODULE_TYPE_EXPECTED_V2 0xAA  // Variant 2
 
 /**
  * @brief Initialize I2C master bus
@@ -128,9 +129,14 @@ static void test_register_access(void)
     if (status != VL53LX_ERROR_NONE) {
         ESP_LOGE(TAG, "Failed to read Module Type (status: %d)", status);
     } else {
+        const char *variant_info = "[UNKNOWN]";
+        if (module_type == VL53L3CX_MODULE_TYPE_EXPECTED_V1) {
+            variant_info = "[OK - Variant 1]";
+        } else if (module_type == VL53L3CX_MODULE_TYPE_EXPECTED_V2) {
+            variant_info = "[OK - Variant 2]";
+        }
         ESP_LOGI(TAG, "Module Type (0x%04X): 0x%02X %s",
-                 VL53L3CX_REG_MODULE_TYPE, module_type,
-                 (module_type == VL53L3CX_MODULE_TYPE_EXPECTED) ? "[OK]" : "[MISMATCH!]");
+                 VL53L3CX_REG_MODULE_TYPE, module_type, variant_info);
     }
 
     // Read Mask Revision (informational)
@@ -145,16 +151,25 @@ static void test_register_access(void)
     ESP_LOGI(TAG, "==================================");
 
     // Verify results
-    if (model_id == VL53L3CX_MODEL_ID_EXPECTED &&
-        module_type == VL53L3CX_MODULE_TYPE_EXPECTED) {
+    bool model_id_ok = (model_id == VL53L3CX_MODEL_ID_EXPECTED);
+    bool module_type_ok = (module_type == VL53L3CX_MODULE_TYPE_EXPECTED_V1) ||
+                          (module_type == VL53L3CX_MODULE_TYPE_EXPECTED_V2);
+
+    if (model_id_ok && module_type_ok) {
         ESP_LOGI(TAG, "✓ VL53L3CX identification successful!");
         ESP_LOGI(TAG, "  Platform layer is working correctly.");
     } else {
         ESP_LOGW(TAG, "✗ VL53L3CX identification failed!");
-        ESP_LOGW(TAG, "  Expected Model ID: 0x%02X, got: 0x%02X",
-                 VL53L3CX_MODEL_ID_EXPECTED, model_id);
-        ESP_LOGW(TAG, "  Expected Module Type: 0x%02X, got: 0x%02X",
-                 VL53L3CX_MODULE_TYPE_EXPECTED, module_type);
+        if (!model_id_ok) {
+            ESP_LOGW(TAG, "  Expected Model ID: 0x%02X, got: 0x%02X",
+                     VL53L3CX_MODEL_ID_EXPECTED, model_id);
+        }
+        if (!module_type_ok) {
+            ESP_LOGW(TAG, "  Expected Module Type: 0x%02X or 0x%02X, got: 0x%02X",
+                     VL53L3CX_MODULE_TYPE_EXPECTED_V1,
+                     VL53L3CX_MODULE_TYPE_EXPECTED_V2,
+                     module_type);
+        }
     }
 }
 
