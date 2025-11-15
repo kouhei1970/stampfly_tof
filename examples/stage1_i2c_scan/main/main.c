@@ -15,36 +15,32 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "stampfly_tof_config.h"
 
 static const char *TAG = "I2C_SCAN";
 
+static i2c_master_bus_handle_t i2c_bus_handle = NULL;
+
 /**
  * @brief Initialize I2C master
  */
 static esp_err_t i2c_master_init(void)
 {
-    i2c_config_t conf = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = STAMPFLY_I2C_SDA_GPIO,
+    i2c_master_bus_config_t bus_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = STAMPFLY_I2C_PORT,
         .scl_io_num = STAMPFLY_I2C_SCL_GPIO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = STAMPFLY_I2C_FREQ_HZ,
+        .sda_io_num = STAMPFLY_I2C_SDA_GPIO,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
     };
 
-    esp_err_t err = i2c_param_config(STAMPFLY_I2C_PORT, &conf);
+    esp_err_t err = i2c_new_master_bus(&bus_config, &i2c_bus_handle);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "I2C param config failed: %s", esp_err_to_name(err));
-        return err;
-    }
-
-    err = i2c_driver_install(STAMPFLY_I2C_PORT, conf.mode, 0, 0, 0);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "I2C driver install failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "I2C master bus init failed: %s", esp_err_to_name(err));
         return err;
     }
 
@@ -94,26 +90,32 @@ static void i2c_scan(void)
     int devices_found = 0;
 
     for (uint8_t addr = 0x03; addr < 0x78; addr++) {
-        i2c_cmd_handle_t cmd = i2c_cmd_link_create();
-        i2c_master_start(cmd);
-        i2c_master_write_byte(cmd, (addr << 1) | I2C_MASTER_WRITE, true);
-        i2c_master_stop(cmd);
+        // Add device temporarily to probe
+        i2c_device_config_t dev_cfg = {
+            .dev_addr_length = I2C_ADDR_BIT_LEN_7,
+            .device_address = addr,
+            .scl_speed_hz = STAMPFLY_I2C_FREQ_HZ,
+        };
 
-        esp_err_t ret = i2c_master_cmd_begin(STAMPFLY_I2C_PORT, cmd, pdMS_TO_TICKS(50));
-        i2c_cmd_link_delete(cmd);
+        i2c_master_dev_handle_t dev_handle;
+        esp_err_t ret = i2c_master_bus_add_device(i2c_bus_handle, &dev_cfg, &dev_handle);
 
         if (ret == ESP_OK) {
-            ESP_LOGI(TAG, "Device found at address 0x%02X", addr);
-            devices_found++;
+            // Try to probe the device
+            ret = i2c_master_probe(i2c_bus_handle, addr, pdMS_TO_TICKS(50));
 
-            // Check if it's the expected VL53L3CX address
-            if (addr == VL53L3CX_DEFAULT_I2C_ADDR) {
-                ESP_LOGI(TAG, "  -> VL53L3CX detected at default address!");
+            if (ret == ESP_OK) {
+                ESP_LOGI(TAG, "Device found at address 0x%02X", addr);
+                devices_found++;
+
+                // Check if it's the expected VL53L3CX address
+                if (addr == VL53L3CX_DEFAULT_I2C_ADDR) {
+                    ESP_LOGI(TAG, "  -> VL53L3CX detected at default address!");
+                }
             }
-        } else if (ret == ESP_ERR_TIMEOUT) {
-            // No device at this address (this is normal)
-        } else {
-            ESP_LOGW(TAG, "Error at address 0x%02X: %s", addr, esp_err_to_name(ret));
+
+            // Remove the device after probing
+            i2c_master_bus_rm_device(dev_handle);
         }
     }
 
