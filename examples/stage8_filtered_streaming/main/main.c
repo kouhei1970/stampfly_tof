@@ -52,6 +52,10 @@ static i2c_master_bus_handle_t i2c_bus_handle = NULL;
 static vl53lx_filter_t bottom_filter;
 static vl53lx_filter_t front_filter;
 
+// Last valid filtered values (for when filter rejects a sample)
+static uint16_t bottom_last_valid = 0;
+static uint16_t front_last_valid = 0;
+
 /**
  * @brief Initialize I2C master bus
  */
@@ -293,10 +297,12 @@ static void bottom_sensor_task(void *pvParameters)
 
                     // Teleplot format output - filtered data
                     if (filter_valid) {
+                        // Update last valid value
+                        bottom_last_valid = filtered_distance;
                         printf(">bottom_filtered:%u\n", filtered_distance);
                     } else {
-                        // Outlier rejected
-                        printf(">bottom_filtered:0\n");
+                        // Outlier rejected - use last valid value
+                        printf(">bottom_filtered:%u\n", bottom_last_valid);
                     }
                 } else {
                     printf(">bottom_raw:0\n");
@@ -356,10 +362,12 @@ static void front_sensor_task(void *pvParameters)
 
                     // Teleplot format output - filtered data
                     if (filter_valid) {
+                        // Update last valid value
+                        front_last_valid = filtered_distance;
                         printf(">front_filtered:%u\n", filtered_distance);
                     } else {
-                        // Outlier rejected
-                        printf(">front_filtered:0\n");
+                        // Outlier rejected - use last valid value
+                        printf(">front_filtered:%u\n", front_last_valid);
                     }
                 } else {
                     printf(">front_raw:0\n");
