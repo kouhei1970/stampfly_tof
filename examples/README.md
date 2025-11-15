@@ -49,18 +49,29 @@ Device found at address 0x29
 
 ---
 
-### 🔲 Stage 2: レジスタ読み書きテスト（未実装）
+### ✅ Stage 2: レジスタ読み書きテスト
+
+**ファイル**: [stage2_register_test/main.c](stage2_register_test/main.c)
 
 **目的**: VL53L3CXレジスタへの直接アクセス
 
 **テスト内容**:
 - プラットフォーム層I2C関数実装
 - Model ID (0x010F) 読み出し → 期待値: 0xEA
-- Module Type (0x0110) 読み出し → 期待値: 0xCC
+- Module Type (0x0110) 読み出し → 期待値: 0xAA（注: 0xCCはVL53L1の値）
+
+**期待結果**:
+```
+Model ID (0x010F): 0xEA [OK]
+Module Type (0x0110): 0xAA [OK]
+```
 
 **必要なもの**:
 - vl53lx_platform.c/h（プラットフォーム層）
 - 基本的な型定義ヘッダー
+
+**ビルド確認**: ✅ 成功
+**実機テスト**: ✅ 成功
 
 ---
 
@@ -168,10 +179,10 @@ Device found at address 0x29
 
 ## 次のステップ
 
-Stage 1が成功したら、以下の順で進めてください：
+以下の順で進めてください：
 
 1. ✅ Stage 1実行 → デバイス検出確認
-2. 🔲 Stage 2実装 → レジスタ読み出し確認
+2. ✅ Stage 2実行 → レジスタ読み出し確認
 3. 🔲 Stage 3実装 → API初期化確認
 4. 🔲 Stage 4実装 → 距離測定動作確認
 5. 🔲 Stage 5実装 → 割り込み動作確認
