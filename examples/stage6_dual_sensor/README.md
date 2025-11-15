@@ -125,6 +125,7 @@ BOTTOM: ✓ Product Type: 0xAA, Rev: 1.1
 Using default measurement parameters
 ==================================
 Starting dual sensor measurements
+Interrupt mode, 20 measurements per sensor
 Bottom sensor only (USB powered)
 ==================================
 BOTTOM: Starting measurements...
@@ -162,6 +163,7 @@ Initializing FRONT sensor...
 FRONT: ✓ Product Type: 0xAA, Rev: 1.1
 ==================================
 Starting dual sensor measurements
+Interrupt mode, 20 measurements per sensor
 Both sensors active
 ==================================
 BOTTOM: Starting measurements...

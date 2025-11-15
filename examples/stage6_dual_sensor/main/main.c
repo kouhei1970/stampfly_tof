@@ -347,6 +347,7 @@ static void perform_dual_measurements(void)
 {
     ESP_LOGI(TAG, "==================================");
     ESP_LOGI(TAG, "Starting dual sensor measurements");
+    ESP_LOGI(TAG, "Interrupt mode, %d measurements per sensor", MEASUREMENT_COUNT);
 #if ENABLE_FRONT_SENSOR
     ESP_LOGI(TAG, "Both sensors active");
 #else
