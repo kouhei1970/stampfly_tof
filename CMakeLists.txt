@@ -2,7 +2,7 @@
 file(GLOB VL53LX_SRCS "src/vl53lx/*.c")
 
 idf_component_register(
-    SRCS "src/vl53lx_platform.c" ${VL53LX_SRCS}
+    SRCS "src/vl53lx_platform.c" "src/vl53lx_platform_ipp.c" ${VL53LX_SRCS}
     INCLUDE_DIRS "include/vl53lx" "include"
     REQUIRES driver esp_timer
 )
