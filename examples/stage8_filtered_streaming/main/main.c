@@ -414,29 +414,23 @@ void app_main(void)
     }
 #endif
 
-    // Initialize outlier filters
-    vl53lx_filter_config_t filter_config = VL53LX_FilterGetDefaultConfig();
-    filter_config.filter_type = VL53LX_FILTER_KALMAN;  // Kalman filter (optimal estimation)
-    filter_config.enable_status_check = true;          // Reject invalid statuses
-    filter_config.enable_rate_limit = true;            // Reject sudden jumps
-    filter_config.max_change_rate_mm = 500;            // Max 500mm change between samples
-    filter_config.kalman_process_noise = 0.01f;        // Q: Low process noise (stationary)
-    filter_config.kalman_measurement_noise = 4.0f;     // R: Measurement noise (~2mm std)
-
-    if (!VL53LX_FilterInitWithConfig(&bottom_filter, &filter_config)) {
-        ESP_LOGE(TAG, "Failed to initialize bottom filter");
+    // Initialize Kalman filters (default: Q=1.0, R=4.0, rate_limit=500mm)
+    if (!VL53LX_FilterInit(&bottom_filter)) {
+        ESP_LOGE(TAG, "Failed to initialize bottom Kalman filter");
         return;
     }
-    ESP_LOGI(TAG, "Bottom filter: Kalman, Q=%.2f, R=%.1f, rate_limit=500mm",
-             filter_config.kalman_process_noise, filter_config.kalman_measurement_noise);
+    ESP_LOGI(TAG, "Bottom filter: 1D Kalman (Q=%.1f, R=%.1f)",
+             bottom_filter.config.kalman_process_noise,
+             bottom_filter.config.kalman_measurement_noise);
 
 #if ENABLE_FRONT_SENSOR
-    if (!VL53LX_FilterInitWithConfig(&front_filter, &filter_config)) {
-        ESP_LOGE(TAG, "Failed to initialize front filter");
+    if (!VL53LX_FilterInit(&front_filter)) {
+        ESP_LOGE(TAG, "Failed to initialize front Kalman filter");
         return;
     }
-    ESP_LOGI(TAG, "Front filter: Kalman, Q=%.2f, R=%.1f, rate_limit=500mm",
-             filter_config.kalman_process_noise, filter_config.kalman_measurement_noise);
+    ESP_LOGI(TAG, "Front filter: 1D Kalman (Q=%.1f, R=%.1f)",
+             front_filter.config.kalman_process_noise,
+             front_filter.config.kalman_measurement_noise);
 #endif
 
     // Initialize I2C bus

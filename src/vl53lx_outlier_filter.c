@@ -1,101 +1,26 @@
 /**
  * @file vl53lx_outlier_filter.c
- * @brief VL53LX Outlier Detection and Filtering Implementation
+ * @brief VL53LX 1D Kalman Filter Implementation
  */
 
 #include "vl53lx_outlier_filter.h"
 #include <stdlib.h>
-#include <string.h>
 
 // Default configuration values
-#define DEFAULT_WINDOW_SIZE         5       // 5 samples
 #define DEFAULT_MAX_CHANGE_RATE_MM  500     // 500mm max change between samples
 #define DEFAULT_VALID_STATUS_MASK   0x01    // Only status 0 (valid) by default
-
-/**
- * @brief Compare function for qsort (ascending order)
- */
-static int compare_uint16(const void *a, const void *b)
-{
-    return (*(uint16_t*)a - *(uint16_t*)b);
-}
-
-/**
- * @brief Calculate median of buffer
- */
-static uint16_t calculate_median(uint16_t *buffer, uint8_t count)
-{
-    if (count == 0) {
-        return 0;
-    }
-
-    // Create temporary buffer for sorting
-    uint16_t temp[15];  // Max window size
-    memcpy(temp, buffer, count * sizeof(uint16_t));
-
-    // Sort
-    qsort(temp, count, sizeof(uint16_t), compare_uint16);
-
-    // Return median
-    if (count % 2 == 0) {
-        return (temp[count/2 - 1] + temp[count/2]) / 2;
-    } else {
-        return temp[count/2];
-    }
-}
-
-/**
- * @brief Calculate average of buffer
- */
-static uint16_t calculate_average(uint16_t *buffer, uint8_t count)
-{
-    if (count == 0) {
-        return 0;
-    }
-
-    uint32_t sum = 0;
-    for (uint8_t i = 0; i < count; i++) {
-        sum += buffer[i];
-    }
-
-    return sum / count;
-}
-
-/**
- * @brief Calculate weighted average of buffer (recent samples weighted more)
- */
-static uint16_t calculate_weighted_average(uint16_t *buffer, uint8_t count, uint8_t head)
-{
-    if (count == 0) {
-        return 0;
-    }
-
-    uint32_t weighted_sum = 0;
-    uint32_t weight_sum = 0;
-
-    for (uint8_t i = 0; i < count; i++) {
-        // Most recent sample has highest weight
-        uint8_t idx = (head + count - 1 - i) % count;
-        uint8_t weight = count - i;  // Recent: count, oldest: 1
-
-        weighted_sum += buffer[idx] * weight;
-        weight_sum += weight;
-    }
-
-    return weighted_sum / weight_sum;
-}
+#define DEFAULT_KALMAN_Q            1.0f    // Process noise (responsive)
+#define DEFAULT_KALMAN_R            4.0f    // Measurement noise (~2mm std)
 
 vl53lx_filter_config_t VL53LX_FilterGetDefaultConfig(void)
 {
     vl53lx_filter_config_t config = {
-        .filter_type = VL53LX_FILTER_MEDIAN,
-        .window_size = DEFAULT_WINDOW_SIZE,
         .enable_status_check = true,
         .enable_rate_limit = true,
         .max_change_rate_mm = DEFAULT_MAX_CHANGE_RATE_MM,
         .valid_status_mask = DEFAULT_VALID_STATUS_MASK,
-        .kalman_process_noise = 0.01f,      // Q: Low process noise (sensor is stationary)
-        .kalman_measurement_noise = 4.0f,   // R: Measurement noise based on sensor spec
+        .kalman_process_noise = DEFAULT_KALMAN_Q,
+        .kalman_measurement_noise = DEFAULT_KALMAN_R,
     };
     return config;
 }
@@ -112,28 +37,10 @@ bool VL53LX_FilterInitWithConfig(vl53lx_filter_t *filter, const vl53lx_filter_co
         return false;
     }
 
-    // Validate window size
-    if (config->window_size < 3 || config->window_size > 15) {
-        return false;
-    }
-
     // Copy configuration
-    memcpy(&filter->config, config, sizeof(vl53lx_filter_config_t));
-
-    // Allocate buffers
-    filter->buffer = (uint16_t*)malloc(config->window_size * sizeof(uint16_t));
-    filter->status_buffer = (uint8_t*)malloc(config->window_size * sizeof(uint8_t));
-
-    if (filter->buffer == NULL || filter->status_buffer == NULL) {
-        // Cleanup on failure
-        if (filter->buffer) free(filter->buffer);
-        if (filter->status_buffer) free(filter->status_buffer);
-        return false;
-    }
+    filter->config = *config;
 
     // Initialize state
-    filter->head = 0;
-    filter->count = 0;
     filter->last_output = 0;
     filter->rejected_count = 0;
     filter->samples_since_reset = 0;
@@ -154,16 +61,6 @@ void VL53LX_FilterDeinit(vl53lx_filter_t *filter)
         return;
     }
 
-    if (filter->buffer) {
-        free(filter->buffer);
-        filter->buffer = NULL;
-    }
-
-    if (filter->status_buffer) {
-        free(filter->status_buffer);
-        filter->status_buffer = NULL;
-    }
-
     filter->initialized = false;
 }
 
@@ -173,8 +70,6 @@ void VL53LX_FilterReset(vl53lx_filter_t *filter)
         return;
     }
 
-    filter->head = 0;
-    filter->count = 0;
     filter->last_output = 0;
     filter->rejected_count = 0;
     filter->samples_since_reset = 0;
@@ -217,11 +112,7 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
     }
 
     // Check rate of change if enabled and filter has previous output
-    bool has_previous_output = (filter->config.filter_type == VL53LX_FILTER_KALMAN)
-                               ? filter->kalman_initialized
-                               : (filter->count > 0);
-
-    if (filter->config.enable_rate_limit && has_previous_output) {
+    if (filter->config.enable_rate_limit && filter->kalman_initialized) {
         int32_t change = (int32_t)distance_mm - (int32_t)filter->last_output;
 
         // After reset, allow larger changes for first few samples
@@ -247,83 +138,42 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
         filter->rejected_count = 0;
     }
 
-    // Apply selected filter
+    // Kalman filter
     uint16_t filtered_value;
 
-    if (filter->config.filter_type == VL53LX_FILTER_KALMAN) {
-        // Kalman filter doesn't use buffer, process directly
-        if (!filter->kalman_initialized) {
-            // Initialize with first measurement (only if valid)
-            if (status_valid && rate_valid) {
-                filter->kalman_x = (float)distance_mm;
-                filter->kalman_p = filter->config.kalman_measurement_noise;
-                filter->kalman_initialized = true;
-                filtered_value = distance_mm;
-            } else {
-                // Cannot initialize with invalid sample
-                return false;
-            }
-        } else {
-            // Kalman filter update
-            float Q = filter->config.kalman_process_noise;
-            float R = filter->config.kalman_measurement_noise;
-
-            // Prediction step (always execute)
-            float x_pred = filter->kalman_x;  // No state transition for stationary model
-            float p_pred = filter->kalman_p + Q;
-
-            if (status_valid && rate_valid) {
-                // Observation valid: perform full update (prediction + observation)
-                float K = p_pred / (p_pred + R);  // Kalman gain
-                float z = (float)distance_mm;      // Measurement
-                filter->kalman_x = x_pred + K * (z - x_pred);
-                filter->kalman_p = (1.0f - K) * p_pred;
-            } else {
-                // Observation invalid: prediction only (uncertainty increases)
-                filter->kalman_x = x_pred;
-                filter->kalman_p = p_pred;  // Uncertainty grows
-            }
-
-            filtered_value = (uint16_t)(filter->kalman_x + 0.5f);  // Round to nearest integer
-        }
-    } else {
-        // Buffer-based filters (median, average, weighted average)
-        // Reject invalid samples for buffer-based filters
-        if (!status_valid || !rate_valid) {
-            return false;
-        }
-
-        // Add sample to circular buffer
-        filter->buffer[filter->head] = distance_mm;
-        filter->status_buffer[filter->head] = range_status;
-        filter->head = (filter->head + 1) % filter->config.window_size;
-
-        if (filter->count < filter->config.window_size) {
-            filter->count++;
-        }
-
-        // Need at least 3 samples for meaningful filtering
-        if (filter->count < 3) {
+    if (!filter->kalman_initialized) {
+        // Initialize with first measurement (only if valid)
+        if (status_valid && rate_valid) {
+            filter->kalman_x = (float)distance_mm;
+            filter->kalman_p = filter->config.kalman_measurement_noise;
+            filter->kalman_initialized = true;
             filtered_value = distance_mm;
         } else {
-            switch (filter->config.filter_type) {
-                case VL53LX_FILTER_MEDIAN:
-                    filtered_value = calculate_median(filter->buffer, filter->count);
-                    break;
-
-                case VL53LX_FILTER_AVERAGE:
-                    filtered_value = calculate_average(filter->buffer, filter->count);
-                    break;
-
-                case VL53LX_FILTER_WEIGHTED_AVG:
-                    filtered_value = calculate_weighted_average(filter->buffer, filter->count, filter->head);
-                    break;
-
-                default:
-                    filtered_value = distance_mm;
-                    break;
-            }
+            // Cannot initialize with invalid sample
+            return false;
         }
+    } else {
+        // Kalman filter update
+        float Q = filter->config.kalman_process_noise;
+        float R = filter->config.kalman_measurement_noise;
+
+        // Prediction step (always execute)
+        float x_pred = filter->kalman_x;  // No state transition for stationary model
+        float p_pred = filter->kalman_p + Q;
+
+        if (status_valid && rate_valid) {
+            // Observation valid: perform full update (prediction + observation)
+            float K = p_pred / (p_pred + R);  // Kalman gain
+            float z = (float)distance_mm;      // Measurement
+            filter->kalman_x = x_pred + K * (z - x_pred);
+            filter->kalman_p = (1.0f - K) * p_pred;
+        } else {
+            // Observation invalid: prediction only (uncertainty increases)
+            filter->kalman_x = x_pred;
+            filter->kalman_p = p_pred;  // Uncertainty grows
+        }
+
+        filtered_value = (uint16_t)(filter->kalman_x + 0.5f);  // Round to nearest integer
     }
 
     *output_mm = filtered_value;
