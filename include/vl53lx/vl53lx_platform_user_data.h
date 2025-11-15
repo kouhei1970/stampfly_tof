@@ -36,7 +36,8 @@
 
 
 
-#include "stm32xxx_hal.h"
+// ESP-IDF platform includes
+#include "driver/i2c_master.h"
 
 
 
@@ -83,7 +84,7 @@ typedef struct {
     uint8_t   i2c_slave_address;
 	uint8_t   comms_type;
 	uint16_t  comms_speed_khz;
-	I2C_HandleTypeDef *I2cHandle;
+	i2c_master_dev_handle_t I2cHandle;  // ESP-IDF I2C device handle
 	uint8_t   I2cDevAddr;
 	int     Present;
 	int 	Enabled;

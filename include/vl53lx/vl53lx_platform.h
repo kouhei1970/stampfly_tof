@@ -424,6 +424,38 @@ VL53LX_Error VL53LX_WaitValueMaskEx(
 		uint8_t       mask,
 		uint32_t      poll_delay_ms);
 
+
+/**
+ * @brief ESP-IDF specific platform initialization
+ *
+ * Adds I2C device to the ESP-IDF I2C master bus
+ *
+ * @param[in]   pdev            : pointer to device structure (device handle)
+ * @param[in]   bus_handle      : I2C master bus handle
+ * @param[in]   device_address  : 7-bit I2C device address
+ *
+ * @return   VL53LX_ERROR_NONE    Success
+ * @return  "Other error code"    See ::VL53LX_Error
+ */
+int8_t VL53LX_PlatformInit(
+		VL53LX_DEV pdev,
+		i2c_master_bus_handle_t bus_handle,
+		uint16_t device_address);
+
+
+/**
+ * @brief ESP-IDF specific platform deinitialization
+ *
+ * Removes I2C device from the ESP-IDF I2C master bus
+ *
+ * @param[in]   pdev      : pointer to device structure (device handle)
+ *
+ * @return   VL53LX_ERROR_NONE    Success
+ * @return  "Other error code"    See ::VL53LX_Error
+ */
+int8_t VL53LX_PlatformDeinit(VL53LX_DEV pdev);
+
+
 #ifdef __cplusplus
 }
 #endif

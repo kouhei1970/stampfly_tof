@@ -226,6 +226,71 @@ VL53LX_Error VL53LX_GetTimerValue(int32_t *ptimer_count)
 }
 
 /**
+ * @brief Wait for a register value to match expected value with mask
+ *
+ * Polls a register until the masked value equals the expected value or timeout occurs
+ *
+ * @param[in]   pdev          : pointer to device structure
+ * @param[in]   timeout_ms    : timeout in milliseconds
+ * @param[in]   index         : register index
+ * @param[in]   value         : expected value after applying mask
+ * @param[in]   mask          : mask to apply to read value
+ * @param[in]   poll_delay_ms : delay between polls in milliseconds
+ *
+ * @return   VL53LX_ERROR_NONE      Success
+ * @return   VL53LX_ERROR_TIME_OUT  Timeout occurred
+ * @return   Other error codes
+ */
+VL53LX_Error VL53LX_WaitValueMaskEx(
+    VL53LX_Dev_t *pdev,
+    uint32_t      timeout_ms,
+    uint16_t      index,
+    uint8_t       value,
+    uint8_t       mask,
+    uint32_t      poll_delay_ms)
+{
+    VL53LX_Error status = VL53LX_ERROR_NONE;
+    uint32_t start_time_ms = 0;
+    uint32_t current_time_ms = 0;
+    uint32_t polling_time_ms = 0;
+    uint8_t byte_value = 0;
+    uint8_t found = 0;
+
+    // Get start time (using FreeRTOS ticks converted to ms)
+    start_time_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+    // Keep polling until timeout or value matches
+    while ((status == VL53LX_ERROR_NONE) &&
+           (polling_time_ms < timeout_ms) &&
+           (found == 0)) {
+
+        // Read register value
+        status = VL53LX_RdByte(pdev, index, &byte_value);
+
+        // Check if masked value matches expected value
+        if ((byte_value & mask) == value) {
+            found = 1;
+        }
+
+        // Update polling time
+        current_time_ms = xTaskGetTickCount() * portTICK_PERIOD_MS;
+        polling_time_ms = current_time_ms - start_time_ms;
+
+        // Wait before next poll if not found yet
+        if ((status == VL53LX_ERROR_NONE) && (found == 0) && (polling_time_ms < timeout_ms)) {
+            status = VL53LX_WaitMs(pdev, poll_delay_ms);
+        }
+    }
+
+    // If value not found, return timeout error
+    if (found == 0 && status == VL53LX_ERROR_NONE) {
+        status = VL53LX_ERROR_TIME_OUT;
+    }
+
+    return status;
+}
+
+/**
  * @brief Set GPIO mode (not used in ESP-IDF implementation)
  */
 VL53LX_Error VL53LX_GpioSetMode(uint8_t pin, uint8_t mode)
