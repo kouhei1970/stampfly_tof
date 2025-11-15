@@ -56,6 +56,7 @@ typedef struct {
     uint8_t count;                       ///< Number of valid samples in buffer
     uint16_t last_output;                ///< Last filtered output value
     uint8_t rejected_count;              ///< Consecutive rejected samples count
+    uint8_t samples_since_reset;         ///< Samples accepted since last reset
 
     // Kalman filter state
     float kalman_x;                      ///< Estimated state (distance)

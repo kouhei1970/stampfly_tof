@@ -136,6 +136,7 @@ bool VL53LX_FilterInitWithConfig(vl53lx_filter_t *filter, const vl53lx_filter_co
     filter->count = 0;
     filter->last_output = 0;
     filter->rejected_count = 0;
+    filter->samples_since_reset = 0;
 
     // Initialize Kalman filter state
     filter->kalman_x = 0.0f;
@@ -176,6 +177,7 @@ void VL53LX_FilterReset(vl53lx_filter_t *filter)
     filter->count = 0;
     filter->last_output = 0;
     filter->rejected_count = 0;
+    filter->samples_since_reset = 0;
 
     // Reset Kalman filter
     filter->kalman_x = 0.0f;
@@ -218,7 +220,14 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
 
     if (filter->config.enable_rate_limit && has_previous_output) {
         int32_t change = (int32_t)distance_mm - (int32_t)filter->last_output;
-        if (abs(change) > filter->config.max_change_rate_mm) {
+
+        // After reset, allow larger changes for first few samples
+        uint16_t effective_rate_limit = filter->config.max_change_rate_mm;
+        if (filter->samples_since_reset < 3) {
+            effective_rate_limit = filter->config.max_change_rate_mm * 3;  // 3x more lenient
+        }
+
+        if (abs(change) > effective_rate_limit) {
             // Change too large, reject sample
             filter->rejected_count++;
 
@@ -300,6 +309,11 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
 
     *output_mm = filtered_value;
     filter->last_output = filtered_value;
+
+    // Increment samples since reset (cap at 255 to prevent overflow)
+    if (filter->samples_since_reset < 255) {
+        filter->samples_since_reset++;
+    }
 
     return true;
 }
