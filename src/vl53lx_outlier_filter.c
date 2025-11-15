@@ -199,17 +199,20 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
         return false;
     }
 
+    bool status_valid = true;
+    bool rate_valid = true;
+
     // Check range status if enabled
     if (filter->config.enable_status_check) {
         if (!((1 << range_status) & filter->config.valid_status_mask)) {
-            // Status is invalid, reject sample
+            // Status is invalid
+            status_valid = false;
             filter->rejected_count++;
 
             // If too many consecutive rejections, reset filter
             if (filter->rejected_count >= 5) {
                 VL53LX_FilterReset(filter);
             }
-            return false;
         }
     }
 
@@ -228,21 +231,21 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
         }
 
         if (abs(change) > effective_rate_limit) {
-            // Change too large, reject sample
+            // Change too large
+            rate_valid = false;
             filter->rejected_count++;
 
             // If too many consecutive rejections, reset filter to accept new baseline
             if (filter->rejected_count >= 5) {
                 VL53LX_FilterReset(filter);
-                // After reset, accept this sample as new baseline
-            } else {
-                return false;
             }
         }
     }
 
-    // Sample accepted, reset rejection counter
-    filter->rejected_count = 0;
+    // Sample accepted (either valid or will do prediction-only), reset rejection counter if fully valid
+    if (status_valid && rate_valid) {
+        filter->rejected_count = 0;
+    }
 
     // Apply selected filter
     uint16_t filtered_value;
@@ -250,30 +253,46 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
     if (filter->config.filter_type == VL53LX_FILTER_KALMAN) {
         // Kalman filter doesn't use buffer, process directly
         if (!filter->kalman_initialized) {
-            // Initialize with first measurement
-            filter->kalman_x = (float)distance_mm;
-            filter->kalman_p = filter->config.kalman_measurement_noise;
-            filter->kalman_initialized = true;
-            filtered_value = distance_mm;
+            // Initialize with first measurement (only if valid)
+            if (status_valid && rate_valid) {
+                filter->kalman_x = (float)distance_mm;
+                filter->kalman_p = filter->config.kalman_measurement_noise;
+                filter->kalman_initialized = true;
+                filtered_value = distance_mm;
+            } else {
+                // Cannot initialize with invalid sample
+                return false;
+            }
         } else {
             // Kalman filter update
             float Q = filter->config.kalman_process_noise;
             float R = filter->config.kalman_measurement_noise;
 
-            // Prediction step
+            // Prediction step (always execute)
             float x_pred = filter->kalman_x;  // No state transition for stationary model
             float p_pred = filter->kalman_p + Q;
 
-            // Update step
-            float K = p_pred / (p_pred + R);  // Kalman gain
-            float z = (float)distance_mm;      // Measurement
-            filter->kalman_x = x_pred + K * (z - x_pred);
-            filter->kalman_p = (1.0f - K) * p_pred;
+            if (status_valid && rate_valid) {
+                // Observation valid: perform full update (prediction + observation)
+                float K = p_pred / (p_pred + R);  // Kalman gain
+                float z = (float)distance_mm;      // Measurement
+                filter->kalman_x = x_pred + K * (z - x_pred);
+                filter->kalman_p = (1.0f - K) * p_pred;
+            } else {
+                // Observation invalid: prediction only (uncertainty increases)
+                filter->kalman_x = x_pred;
+                filter->kalman_p = p_pred;  // Uncertainty grows
+            }
 
             filtered_value = (uint16_t)(filter->kalman_x + 0.5f);  // Round to nearest integer
         }
     } else {
         // Buffer-based filters (median, average, weighted average)
+        // Reject invalid samples for buffer-based filters
+        if (!status_valid || !rate_valid) {
+            return false;
+        }
+
         // Add sample to circular buffer
         filter->buffer[filter->head] = distance_mm;
         filter->status_buffer[filter->head] = range_status;
@@ -310,8 +329,8 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
     *output_mm = filtered_value;
     filter->last_output = filtered_value;
 
-    // Increment samples since reset (cap at 255 to prevent overflow)
-    if (filter->samples_since_reset < 255) {
+    // Increment samples since reset only for fully valid samples (cap at 255 to prevent overflow)
+    if (status_valid && rate_valid && filter->samples_since_reset < 255) {
         filter->samples_since_reset++;
     }
 
