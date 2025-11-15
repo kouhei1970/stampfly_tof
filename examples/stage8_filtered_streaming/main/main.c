@@ -408,24 +408,27 @@ void app_main(void)
 
     // Initialize outlier filters
     vl53lx_filter_config_t filter_config = VL53LX_FilterGetDefaultConfig();
-    filter_config.filter_type = VL53LX_FILTER_MEDIAN;  // Median filter (best for outliers)
-    filter_config.window_size = 5;                      // 5 sample window
+    filter_config.filter_type = VL53LX_FILTER_KALMAN;  // Kalman filter (optimal estimation)
     filter_config.enable_status_check = true;          // Reject invalid statuses
     filter_config.enable_rate_limit = true;            // Reject sudden jumps
     filter_config.max_change_rate_mm = 500;            // Max 500mm change between samples
+    filter_config.kalman_process_noise = 0.01f;        // Q: Low process noise (stationary)
+    filter_config.kalman_measurement_noise = 4.0f;     // R: Measurement noise (~2mm std)
 
     if (!VL53LX_FilterInitWithConfig(&bottom_filter, &filter_config)) {
         ESP_LOGE(TAG, "Failed to initialize bottom filter");
         return;
     }
-    ESP_LOGI(TAG, "Bottom filter: Median, window=5, rate_limit=500mm");
+    ESP_LOGI(TAG, "Bottom filter: Kalman, Q=%.2f, R=%.1f, rate_limit=500mm",
+             filter_config.kalman_process_noise, filter_config.kalman_measurement_noise);
 
 #if ENABLE_FRONT_SENSOR
     if (!VL53LX_FilterInitWithConfig(&front_filter, &filter_config)) {
         ESP_LOGE(TAG, "Failed to initialize front filter");
         return;
     }
-    ESP_LOGI(TAG, "Front filter: Median, window=5, rate_limit=500mm");
+    ESP_LOGI(TAG, "Front filter: Kalman, Q=%.2f, R=%.1f, rate_limit=500mm",
+             filter_config.kalman_process_noise, filter_config.kalman_measurement_noise);
 #endif
 
     // Initialize I2C bus
@@ -468,7 +471,7 @@ void app_main(void)
     ESP_LOGI(TAG, "==================================");
     ESP_LOGI(TAG, "Starting continuous streaming");
     ESP_LOGI(TAG, "Interrupt mode, Teleplot format");
-    ESP_LOGI(TAG, "Filter: Median filter, window=5");
+    ESP_LOGI(TAG, "Filter: 1D Kalman filter");
 #if ENABLE_FRONT_SENSOR
     ESP_LOGI(TAG, "Both sensors active");
 #else

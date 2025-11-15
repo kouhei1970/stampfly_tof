@@ -25,7 +25,8 @@ extern "C" {
 typedef enum {
     VL53LX_FILTER_MEDIAN,      ///< Moving median filter (best for outliers)
     VL53LX_FILTER_AVERAGE,     ///< Moving average filter (smooth)
-    VL53LX_FILTER_WEIGHTED_AVG ///< Weighted average filter
+    VL53LX_FILTER_WEIGHTED_AVG,///< Weighted average filter
+    VL53LX_FILTER_KALMAN       ///< 1D Kalman filter (optimal estimation)
 } vl53lx_filter_type_t;
 
 /**
@@ -33,11 +34,15 @@ typedef enum {
  */
 typedef struct {
     vl53lx_filter_type_t filter_type;   ///< Type of filter to apply
-    uint8_t window_size;                 ///< Filter window size (3-15)
+    uint8_t window_size;                 ///< Filter window size (3-15, not used for Kalman)
     bool enable_status_check;            ///< Enable range status validation
     bool enable_rate_limit;              ///< Enable rate-of-change limiter
     uint16_t max_change_rate_mm;         ///< Maximum change rate (mm) between samples
     uint8_t valid_status_mask;           ///< Bitmask of valid range statuses (default: 0x01 for status 0 only)
+
+    // Kalman filter specific parameters
+    float kalman_process_noise;          ///< Process noise covariance Q (default: 0.01)
+    float kalman_measurement_noise;      ///< Measurement noise covariance R (default: 4.0)
 } vl53lx_filter_config_t;
 
 /**
@@ -51,6 +56,12 @@ typedef struct {
     uint8_t count;                       ///< Number of valid samples in buffer
     uint16_t last_output;                ///< Last filtered output value
     uint8_t rejected_count;              ///< Consecutive rejected samples count
+
+    // Kalman filter state
+    float kalman_x;                      ///< Estimated state (distance)
+    float kalman_p;                      ///< Estimation error covariance
+    bool kalman_initialized;             ///< Kalman filter initialized flag
+
     bool initialized;                    ///< Filter initialized flag
 } vl53lx_filter_t;
 

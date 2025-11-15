@@ -94,6 +94,8 @@ vl53lx_filter_config_t VL53LX_FilterGetDefaultConfig(void)
         .enable_rate_limit = true,
         .max_change_rate_mm = DEFAULT_MAX_CHANGE_RATE_MM,
         .valid_status_mask = DEFAULT_VALID_STATUS_MASK,
+        .kalman_process_noise = 0.01f,      // Q: Low process noise (sensor is stationary)
+        .kalman_measurement_noise = 4.0f,   // R: Measurement noise based on sensor spec
     };
     return config;
 }
@@ -134,6 +136,12 @@ bool VL53LX_FilterInitWithConfig(vl53lx_filter_t *filter, const vl53lx_filter_co
     filter->count = 0;
     filter->last_output = 0;
     filter->rejected_count = 0;
+
+    // Initialize Kalman filter state
+    filter->kalman_x = 0.0f;
+    filter->kalman_p = 1000.0f;  // High initial uncertainty
+    filter->kalman_initialized = false;
+
     filter->initialized = true;
 
     return true;
@@ -168,6 +176,11 @@ void VL53LX_FilterReset(vl53lx_filter_t *filter)
     filter->count = 0;
     filter->last_output = 0;
     filter->rejected_count = 0;
+
+    // Reset Kalman filter
+    filter->kalman_x = 0.0f;
+    filter->kalman_p = 1000.0f;
+    filter->kalman_initialized = false;
 }
 
 bool VL53LX_FilterIsValidRangeStatus(uint8_t range_status)
@@ -218,40 +231,67 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
     // Sample accepted, reset rejection counter
     filter->rejected_count = 0;
 
-    // Add sample to circular buffer
-    filter->buffer[filter->head] = distance_mm;
-    filter->status_buffer[filter->head] = range_status;
-    filter->head = (filter->head + 1) % filter->config.window_size;
-
-    if (filter->count < filter->config.window_size) {
-        filter->count++;
-    }
-
-    // Need at least 3 samples for meaningful filtering
-    if (filter->count < 3) {
-        *output_mm = distance_mm;
-        filter->last_output = distance_mm;
-        return true;
-    }
-
     // Apply selected filter
     uint16_t filtered_value;
-    switch (filter->config.filter_type) {
-        case VL53LX_FILTER_MEDIAN:
-            filtered_value = calculate_median(filter->buffer, filter->count);
-            break;
 
-        case VL53LX_FILTER_AVERAGE:
-            filtered_value = calculate_average(filter->buffer, filter->count);
-            break;
-
-        case VL53LX_FILTER_WEIGHTED_AVG:
-            filtered_value = calculate_weighted_average(filter->buffer, filter->count, filter->head);
-            break;
-
-        default:
+    if (filter->config.filter_type == VL53LX_FILTER_KALMAN) {
+        // Kalman filter doesn't use buffer, process directly
+        if (!filter->kalman_initialized) {
+            // Initialize with first measurement
+            filter->kalman_x = (float)distance_mm;
+            filter->kalman_p = filter->config.kalman_measurement_noise;
+            filter->kalman_initialized = true;
             filtered_value = distance_mm;
-            break;
+        } else {
+            // Kalman filter update
+            float Q = filter->config.kalman_process_noise;
+            float R = filter->config.kalman_measurement_noise;
+
+            // Prediction step
+            float x_pred = filter->kalman_x;  // No state transition for stationary model
+            float p_pred = filter->kalman_p + Q;
+
+            // Update step
+            float K = p_pred / (p_pred + R);  // Kalman gain
+            float z = (float)distance_mm;      // Measurement
+            filter->kalman_x = x_pred + K * (z - x_pred);
+            filter->kalman_p = (1.0f - K) * p_pred;
+
+            filtered_value = (uint16_t)(filter->kalman_x + 0.5f);  // Round to nearest integer
+        }
+    } else {
+        // Buffer-based filters (median, average, weighted average)
+        // Add sample to circular buffer
+        filter->buffer[filter->head] = distance_mm;
+        filter->status_buffer[filter->head] = range_status;
+        filter->head = (filter->head + 1) % filter->config.window_size;
+
+        if (filter->count < filter->config.window_size) {
+            filter->count++;
+        }
+
+        // Need at least 3 samples for meaningful filtering
+        if (filter->count < 3) {
+            filtered_value = distance_mm;
+        } else {
+            switch (filter->config.filter_type) {
+                case VL53LX_FILTER_MEDIAN:
+                    filtered_value = calculate_median(filter->buffer, filter->count);
+                    break;
+
+                case VL53LX_FILTER_AVERAGE:
+                    filtered_value = calculate_average(filter->buffer, filter->count);
+                    break;
+
+                case VL53LX_FILTER_WEIGHTED_AVG:
+                    filtered_value = calculate_weighted_average(filter->buffer, filter->count, filter->head);
+                    break;
+
+                default:
+                    filtered_value = distance_mm;
+                    break;
+            }
+        }
     }
 
     *output_mm = filtered_value;
