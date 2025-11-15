@@ -184,7 +184,7 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
 
     // Check range status if enabled
     if (filter->config.enable_status_check) {
-        if ((1 << range_status) & filter->config.valid_status_mask) {
+        if (!((1 << range_status) & filter->config.valid_status_mask)) {
             // Status is invalid, reject sample
             return false;
         }
