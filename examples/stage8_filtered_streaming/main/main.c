@@ -1,16 +1,18 @@
 /**
  * @file main.c
- * @brief Stage 7: VL53L3CX Teleplot Streaming
+ * @brief Stage 8: VL53L3CX Filtered Teleplot Streaming
  *
- * Continuous distance measurement streaming for Teleplot visualization.
+ * Continuous distance measurement with outlier filtering:
  * - Bottom ToF sensor enabled by default (USB powered)
  * - Front ToF sensor optional (requires battery)
  * - Interrupt-based measurement
- * - Teleplot format output (>variable:value)
+ * - Outlier filtering (median/average/weighted average)
+ * - Teleplot format output with raw and filtered data
  */
 
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
@@ -21,11 +23,12 @@
 #include "stampfly_tof_config.h"
 #include "vl53lx_platform.h"
 #include "vl53lx_api.h"
+#include "vl53lx_outlier_filter.h"
 
-static const char *TAG = "STAGE7_TELEPLOT";
+static const char *TAG = "STAGE8_FILTERED";
 
 // Configuration: Enable/Disable front sensor
-#define ENABLE_FRONT_SENSOR  1  // 0: Bottom only (USB), 1: Both sensors (Battery required)
+#define ENABLE_FRONT_SENSOR  0  // 0: Bottom only (USB), 1: Both sensors (Battery required)
 
 // I2C addresses
 #define BOTTOM_TOF_I2C_ADDR  0x30  // Bottom sensor (changed from default)
@@ -44,6 +47,10 @@ static SemaphoreHandle_t front_semaphore = NULL;
 
 // I2C bus handle (shared between sensors)
 static i2c_master_bus_handle_t i2c_bus_handle = NULL;
+
+// Outlier filters
+static vl53lx_filter_t bottom_filter;
+static vl53lx_filter_t front_filter;
 
 /**
  * @brief Initialize I2C master bus
@@ -250,7 +257,7 @@ static VL53LX_Error initialize_sensor(VL53LX_Dev_t *pDev, const char *name)
 }
 
 /**
- * @brief Bottom sensor streaming task
+ * @brief Bottom sensor streaming task with filtering
  */
 static void bottom_sensor_task(void *pvParameters)
 {
@@ -271,16 +278,29 @@ static void bottom_sensor_task(void *pvParameters)
             status = VL53LX_GetMultiRangingData(&bottom_dev, &data);
             if (status == VL53LX_ERROR_NONE) {
                 if (data.NumberOfObjectsFound > 0) {
-                    uint16_t distance = data.RangeData[0].RangeMilliMeter;
+                    uint16_t raw_distance = data.RangeData[0].RangeMilliMeter;
                     uint8_t range_status = data.RangeData[0].RangeStatus;
                     float signal = data.RangeData[0].SignalRateRtnMegaCps / 65536.0;
 
-                    // Teleplot format output
-                    printf(">bottom_distance:%u\n", distance);
+                    // Apply outlier filter
+                    uint16_t filtered_distance;
+                    bool filter_valid = VL53LX_FilterUpdate(&bottom_filter, raw_distance, range_status, &filtered_distance);
+
+                    // Teleplot format output - raw data
+                    printf(">bottom_raw:%u\n", raw_distance);
                     printf(">bottom_signal:%.2f\n", signal);
                     printf(">bottom_status:%u\n", range_status);
+
+                    // Teleplot format output - filtered data
+                    if (filter_valid) {
+                        printf(">bottom_filtered:%u\n", filtered_distance);
+                    } else {
+                        // Outlier rejected
+                        printf(">bottom_filtered:0\n");
+                    }
                 } else {
-                    printf(">bottom_distance:0\n");
+                    printf(">bottom_raw:0\n");
+                    printf(">bottom_filtered:0\n");
                     printf(">bottom_signal:0.00\n");
                     printf(">bottom_status:255\n");
                 }
@@ -300,7 +320,7 @@ static void bottom_sensor_task(void *pvParameters)
 
 #if ENABLE_FRONT_SENSOR
 /**
- * @brief Front sensor streaming task
+ * @brief Front sensor streaming task with filtering
  */
 static void front_sensor_task(void *pvParameters)
 {
@@ -321,16 +341,29 @@ static void front_sensor_task(void *pvParameters)
             status = VL53LX_GetMultiRangingData(&front_dev, &data);
             if (status == VL53LX_ERROR_NONE) {
                 if (data.NumberOfObjectsFound > 0) {
-                    uint16_t distance = data.RangeData[0].RangeMilliMeter;
+                    uint16_t raw_distance = data.RangeData[0].RangeMilliMeter;
                     uint8_t range_status = data.RangeData[0].RangeStatus;
                     float signal = data.RangeData[0].SignalRateRtnMegaCps / 65536.0;
 
-                    // Teleplot format output
-                    printf(">front_distance:%u\n", distance);
+                    // Apply outlier filter
+                    uint16_t filtered_distance;
+                    bool filter_valid = VL53LX_FilterUpdate(&front_filter, raw_distance, range_status, &filtered_distance);
+
+                    // Teleplot format output - raw data
+                    printf(">front_raw:%u\n", raw_distance);
                     printf(">front_signal:%.2f\n", signal);
                     printf(">front_status:%u\n", range_status);
+
+                    // Teleplot format output - filtered data
+                    if (filter_valid) {
+                        printf(">front_filtered:%u\n", filtered_distance);
+                    } else {
+                        // Outlier rejected
+                        printf(">front_filtered:0\n");
+                    }
                 } else {
-                    printf(">front_distance:0\n");
+                    printf(">front_raw:0\n");
+                    printf(">front_filtered:0\n");
                     printf(">front_signal:0.00\n");
                     printf(">front_status:255\n");
                 }
@@ -354,8 +387,8 @@ void app_main(void)
     VL53LX_Error status;
 
     ESP_LOGI(TAG, "==================================");
-    ESP_LOGI(TAG, "Stage 7: Teleplot Streaming");
-    ESP_LOGI(TAG, "VL53L3CX ToF Sensors");
+    ESP_LOGI(TAG, "Stage 8: Filtered Teleplot Streaming");
+    ESP_LOGI(TAG, "VL53L3CX ToF Sensors with Outlier Filtering");
     ESP_LOGI(TAG, "==================================");
 
     // Create semaphores
@@ -371,6 +404,28 @@ void app_main(void)
         ESP_LOGE(TAG, "Failed to create front semaphore");
         return;
     }
+#endif
+
+    // Initialize outlier filters
+    vl53lx_filter_config_t filter_config = VL53LX_FilterGetDefaultConfig();
+    filter_config.filter_type = VL53LX_FILTER_MEDIAN;  // Median filter (best for outliers)
+    filter_config.window_size = 5;                      // 5 sample window
+    filter_config.enable_status_check = true;          // Reject invalid statuses
+    filter_config.enable_rate_limit = true;            // Reject sudden jumps
+    filter_config.max_change_rate_mm = 500;            // Max 500mm change between samples
+
+    if (!VL53LX_FilterInitWithConfig(&bottom_filter, &filter_config)) {
+        ESP_LOGE(TAG, "Failed to initialize bottom filter");
+        return;
+    }
+    ESP_LOGI(TAG, "Bottom filter: Median, window=5, rate_limit=500mm");
+
+#if ENABLE_FRONT_SENSOR
+    if (!VL53LX_FilterInitWithConfig(&front_filter, &filter_config)) {
+        ESP_LOGE(TAG, "Failed to initialize front filter");
+        return;
+    }
+    ESP_LOGI(TAG, "Front filter: Median, window=5, rate_limit=500mm");
 #endif
 
     // Initialize I2C bus
@@ -413,6 +468,7 @@ void app_main(void)
     ESP_LOGI(TAG, "==================================");
     ESP_LOGI(TAG, "Starting continuous streaming");
     ESP_LOGI(TAG, "Interrupt mode, Teleplot format");
+    ESP_LOGI(TAG, "Filter: Median filter, window=5");
 #if ENABLE_FRONT_SENSOR
     ESP_LOGI(TAG, "Both sensors active");
 #else
@@ -427,5 +483,13 @@ void app_main(void)
     xTaskCreate(front_sensor_task, "front_tof", 4096, NULL, 5, NULL);
 #endif
 
-    ESP_LOGI(TAG, "Streaming tasks started. Use Teleplot to visualize data.");
+    ESP_LOGI(TAG, "Streaming tasks started.");
+    ESP_LOGI(TAG, "Teleplot variables:");
+    ESP_LOGI(TAG, "  - bottom_raw (raw distance)");
+    ESP_LOGI(TAG, "  - bottom_filtered (filtered distance)");
+    ESP_LOGI(TAG, "  - bottom_signal, bottom_status");
+#if ENABLE_FRONT_SENSOR
+    ESP_LOGI(TAG, "  - front_raw, front_filtered");
+    ESP_LOGI(TAG, "  - front_signal, front_status");
+#endif
 }
