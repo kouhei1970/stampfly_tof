@@ -50,6 +50,7 @@ typedef struct {
     uint8_t head;                        ///< Buffer head index
     uint8_t count;                       ///< Number of valid samples in buffer
     uint16_t last_output;                ///< Last filtered output value
+    uint8_t rejected_count;              ///< Consecutive rejected samples count
     bool initialized;                    ///< Filter initialized flag
 } vl53lx_filter_t;
 

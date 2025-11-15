@@ -133,6 +133,7 @@ bool VL53LX_FilterInitWithConfig(vl53lx_filter_t *filter, const vl53lx_filter_co
     filter->head = 0;
     filter->count = 0;
     filter->last_output = 0;
+    filter->rejected_count = 0;
     filter->initialized = true;
 
     return true;
@@ -166,6 +167,7 @@ void VL53LX_FilterReset(vl53lx_filter_t *filter)
     filter->head = 0;
     filter->count = 0;
     filter->last_output = 0;
+    filter->rejected_count = 0;
 }
 
 bool VL53LX_FilterIsValidRangeStatus(uint8_t range_status)
@@ -186,6 +188,12 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
     if (filter->config.enable_status_check) {
         if (!((1 << range_status) & filter->config.valid_status_mask)) {
             // Status is invalid, reject sample
+            filter->rejected_count++;
+
+            // If too many consecutive rejections, reset filter
+            if (filter->rejected_count >= 5) {
+                VL53LX_FilterReset(filter);
+            }
             return false;
         }
     }
@@ -195,9 +203,20 @@ bool VL53LX_FilterUpdate(vl53lx_filter_t *filter, uint16_t distance_mm, uint8_t 
         int32_t change = (int32_t)distance_mm - (int32_t)filter->last_output;
         if (abs(change) > filter->config.max_change_rate_mm) {
             // Change too large, reject sample
-            return false;
+            filter->rejected_count++;
+
+            // If too many consecutive rejections, reset filter to accept new baseline
+            if (filter->rejected_count >= 5) {
+                VL53LX_FilterReset(filter);
+                // After reset, accept this sample as new baseline
+            } else {
+                return false;
+            }
         }
     }
+
+    // Sample accepted, reset rejection counter
+    filter->rejected_count = 0;
 
     // Add sample to circular buffer
     filter->buffer[filter->head] = distance_mm;
