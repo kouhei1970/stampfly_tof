@@ -1,191 +1,194 @@
-# StampFly ToF サンプルプロジェクト集
+# StampFly ToF サンプルプログラム
 
-このフォルダには、段階的にVL53L3CX ToFセンサーの機能をテストできる独立したESP-IDFプロジェクトが含まれています。
+StampFly ToFドライバのサンプルプログラム集です。
 
-## 使い方
+## サンプルの構成
 
-各サンプルフォルダは独立したESP-IDFプロジェクトです。そのフォルダ内で直接ビルド・実行できます。
+### 初心者向けサンプル（⭐まずはこちら）
+
+最小限のコードでToFセンサーを使い始められます：
+
+| サンプル | 説明 | 測定方式 | 推奨度 |
+|---------|------|---------|-------|
+| [basic_polling](basic_polling/) | シンプルなポーリング測定 | ポーリング | ⭐⭐ |
+| [basic_interrupt](basic_interrupt/) | シンプルな割り込み測定 | 割り込み | ⭐⭐⭐ |
+
+**どちらを使うべきか？**
+- **basic_polling**: よりシンプルで理解しやすい（入門者向け）
+- **basic_interrupt**: より効率的で低消費電力（推奨）
+
+### 開発用詳細サンプル
+
+段階的な学習や高度な機能の実装に使用します：
+
+| サンプル | 説明 | ステータス |
+|---------|------|-----------|
+| [development/stage1_i2c_scan](development/stage1_i2c_scan/) | I2Cバススキャン | ✅ |
+| [development/stage2_register_test](development/stage2_register_test/) | レジスタ読み書きテスト | ✅ |
+| [development/stage3_device_init](development/stage3_device_init/) | デバイス初期化 | ✅ |
+| [development/stage4_polling_measurement](development/stage4_polling_measurement/) | ポーリング測定（詳細版） | ✅ |
+| [development/stage5_interrupt_measurement](development/stage5_interrupt_measurement/) | 割り込み測定（詳細版） | ✅ |
+| [development/stage6_dual_sensor](development/stage6_dual_sensor/) | 2センサー同時使用 | ✅ |
+| [development/stage7_teleplot_streaming](development/stage7_teleplot_streaming/) | Teleplotリアルタイム可視化 | ✅ |
+| [development/stage8_filtered_streaming](development/stage8_filtered_streaming/) | カルマンフィルタ付きストリーミング | ✅ |
+
+詳細は [development/README.md](development/README.md) を参照してください。
+
+## クイックスタート
+
+### 1. 初めての測定（ポーリング方式）
 
 ```bash
-# Stage 1に移動
-cd stage1_i2c_scan
-
-# ESP-IDF環境を有効化
-. ~/esp/esp-idf/export.sh
-
-# ターゲット設定（初回のみ）
+cd examples/basic_polling
 idf.py set-target esp32s3
-
-# ビルド・フラッシュ・モニタ
 idf.py build flash monitor
 ```
 
-各プロジェクトは親ディレクトリの `stampfly_tof` コンポーネントを自動的に参照します。
-
-## サンプル一覧
-
-### ✅ Stage 1: I2Cバススキャン
-
-**ファイル**: [stage1_i2c_scan/main.c](stage1_i2c_scan/main.c)
-
-**目的**: I2C通信の基本動作確認
-
-**テスト内容**:
-- I2Cマスター初期化（SDA=GPIO3, SCL=GPIO4, 400kHz）
-- XSHUTピン制御（前方：ON、底面：OFF）
-- I2Cバススキャン（0x03～0x77）
-
-**期待結果**:
+**出力例:**
 ```
-Device found at address 0x29
-  -> VL53L3CX detected at default address!
+[1] Distance:  245 mm, Status: 0, Signal: 15.32 Mcps
+[2] Distance:  247 mm, Status: 0, Signal: 15.28 Mcps
+...
 ```
 
-**必要なもの**:
-- StampFly ToFコンポーネント（基本構成のみ）
-- ESP-IDFのI2Cドライバ
+### 2. 割り込み方式で測定（より効率的）
 
-**ビルド確認**: ✅ 成功
-
----
-
-### ✅ Stage 2: レジスタ読み書きテスト
-
-**ファイル**: [stage2_register_test/main.c](stage2_register_test/main.c)
-
-**目的**: VL53L3CXレジスタへの直接アクセス
-
-**テスト内容**:
-- プラットフォーム層I2C関数実装
-- Model ID (0x010F) 読み出し → 期待値: 0xEA
-- Module Type (0x0110) 読み出し → 期待値: 0xAA（注: 0xCCはVL53L1の値）
-
-**期待結果**:
-```
-Model ID (0x010F): 0xEA [OK]
-Module Type (0x0110): 0xAA [OK]
+```bash
+cd examples/basic_interrupt
+idf.py set-target esp32s3
+idf.py build flash monitor
 ```
 
-**必要なもの**:
-- vl53lx_platform.c/h（プラットフォーム層）
-- 基本的な型定義ヘッダー
+**違い:**
+- ポーリング: CPUが常にデータ準備を確認（シンプル）
+- 割り込み: データ準備時にGPIO割り込みで通知（効率的）
 
-**ビルド確認**: ✅ 成功
-**実機テスト**: ✅ 成功
+## 電源要件
 
----
+**⚠️ 重要：センサーごとに電源要件が異なります**
 
-### 🔲 Stage 3: デバイス初期化（未実装）
+| センサー | GPIO | 電源要件 | デフォルト |
+|---------|------|---------|----------|
+| 底面ToF | GPIO7 | USB給電のみで動作 | ✅ 有効 |
+| 前方ToF | GPIO9 | バッテリー必要 | ❌ 無効 |
 
-**目的**: VL53LX API初期化シーケンス確認
+**推奨テスト手順:**
+1. まず底面ToF（USB給電のみで動作）でテスト
+2. 前方ToFをテストする場合はバッテリーを接続
 
-**テスト内容**:
-- `VL53LX_WaitDeviceBooted()`
-- `VL53LX_DataInit()`
-- `VL53LX_GetDeviceInfo()`
+## 自分のプロジェクトで使う
 
-**必要なもの**:
-- VL53LXコアドライバ（最小構成）
-- プラットフォーム層完成版
+サンプルコードをベースに、自分のプロジェクトに組み込めます。
 
----
+### 基本的な手順
 
-### 🔲 Stage 4: ポーリング測定（未実装）
+1. **コンポーネントをコピー**
+   ```bash
+   cp -r /path/to/stampfly_tof your_project/components/
+   ```
 
-**目的**: 基本的な距離測定（タイミングバジェット33ms）
+2. **CMakeLists.txtで要求**
+   ```cmake
+   idf_component_register(
+       SRCS "main.c"
+       INCLUDE_DIRS "."
+       REQUIRES stampfly_tof  # <- 追加
+   )
+   ```
 
-**テスト内容**:
-- 測定開始
-- `VL53LX_GetMeasurementDataReady()` でポーリング
-- `VL53LX_GetMultiRangingData()` でデータ取得
-- 距離・信号強度・ステータス表示
+3. **コードを実装**
 
-**期待結果**:
-- 約33msごとに測定完了
-- 距離データ: 0～3000mm
-- RangeStatus = 0（有効）
+   [basic_polling/main/main.c](basic_polling/main/main.c) または [basic_interrupt/main/main.c](basic_interrupt/main/main.c) を参考にしてください。
 
----
+### 最小限のコード例（ポーリング）
 
-### 🔲 Stage 5: 割り込み測定（未実装）
+```c
+#include "vl53lx_platform.h"
+#include "vl53lx_api.h"
+#include "stampfly_tof_config.h"
 
-**目的**: GPIO割り込みによる効率的なデータ取得
+void app_main(void) {
+    // 1. I2C初期化
+    i2c_master_bus_handle_t bus;
+    // ... (詳細は basic_polling 参照)
 
-**テスト内容**:
-- GPIO割り込みハンドラ登録
-- FreeRTOSセマフォ使用
-- `VL53LX_ClearInterruptAndStartMeasurement()`
+    // 2. センサー電源ON
+    gpio_set_level(STAMPFLY_TOF_BOTTOM_XSHUT, 1);
 
-**利点**:
-- CPU使用率低減
-- リアルタイム性向上
-- 消費電力削減
+    // 3. センサー初期化
+    VL53LX_Dev_t dev;
+    dev.I2cDevAddr = 0x29;
+    VL53LX_platform_init(&dev, bus);
+    VL53LX_WaitDeviceBooted(&dev);
+    VL53LX_DataInit(&dev);
 
----
+    // 4. 測定
+    VL53LX_StartMeasurement(&dev);
+    while (1) {
+        uint8_t ready = 0;
+        VL53LX_GetMeasurementDataReady(&dev, &ready);
+        if (ready) {
+            VL53LX_MultiRangingData_t data;
+            VL53LX_GetMultiRangingData(&dev, &data);
 
-### 🔲 Stage 6: 2センサー統合（未実装）
+            uint16_t distance = data.RangeData[0].RangeMilliMeter;
+            printf("Distance: %d mm\n", distance);
 
-**目的**: 前方・底面センサーの同時動作
+            VL53LX_ClearInterruptAndStartMeasurement(&dev);
+        }
+    }
+}
+```
 
-**テスト内容**:
-- XSHUTシーケンス制御
-- I2Cアドレス変更（底面: 0x29 → 0x30）
-- 2つのセンサー独立測定
-- 個別割り込み処理
+完全なコードは [basic_polling](basic_polling/) または [basic_interrupt](basic_interrupt/) を参照してください。
 
-**アドレス変更シーケンス**:
-1. 両方のXSHUT → LOW（スタンバイ）
-2. 底面XSHUT → HIGH
-3. 底面のアドレスを0x30に変更
-4. 前方XSHUT → HIGH（0x29で動作）
+## よくある質問
 
----
+### Q: どのサンプルから始めればいいですか？
 
-## 実装の進め方
+**A:** [basic_polling](basic_polling/) から始めてください。より効率的な実装が必要になったら [basic_interrupt](basic_interrupt/) に進んでください。
 
-1. **Stage 1から順番に実装・テスト**
-   各ステージで動作確認してから次に進むことを推奨
+### Q: 前方ToFセンサーを使いたい
 
-2. **ハードウェアでの動作確認**
-   各ステージのビルド後、実機でテストして期待通りの結果が得られることを確認
+**A:** バッテリーを接続してから、コード内の `ENABLE_FRONT_SENSOR` を 1 に設定してください（[stage6](development/stage6_dual_sensor/) 以降のサンプルを参照）。
 
-3. **問題が発生した場合**
-   各サンプルのREADME.mdを参照し、トラブルシューティングを実施
+### Q: リアルタイムでグラフ表示したい
 
-4. **カスタマイズ**
-   サンプルコードをベースに、自分のアプリケーションに合わせて改良
+**A:** [stage7_teleplot_streaming](development/stage7_teleplot_streaming/) を使用してください。VSCodeのTeleplot拡張機能でリアルタイム可視化できます。
+
+### Q: ノイズの多い環境で使いたい
+
+**A:** [stage8_filtered_streaming](development/stage8_filtered_streaming/) の1Dカルマンフィルタを使用してください。外れ値を自動的に除去します。
+
+### Q: 両方のセンサーを同時に使いたい
+
+**A:** [stage6_dual_sensor](development/stage6_dual_sensor/) 以降のサンプルを参照してください。バッテリー接続が必要です。
 
 ## トラブルシューティング
 
-### ビルドエラー
+### センサーが検出されない
 
-- `stampfly_tof_config.h not found`
-  → コンポーネントが正しくコピーされているか確認
+1. USB給電が正常か確認
+2. I2C配線を確認（SDA: GPIO3, SCL: GPIO4）
+3. XSHUTピンが HIGH になっているか確認
+4. [stage1_i2c_scan](development/stage1_i2c_scan/) でI2Cバスをスキャン
 
-- `driver/i2c.h not found`
-  → ESP-IDF環境が正しくセットアップされているか確認
+### 測定が失敗する（前方ToF）
 
-### 実行時エラー
+- **原因**: 前方ToFはバッテリー電源が必要です
+- **対処**: バッテリーを接続してください
 
-- I2C初期化失敗
-  → GPIO番号が正しいか確認
-  → 他のペリフェラルとの競合がないか確認
+### 測定値が不安定
 
-- デバイス未検出
-  → I2C配線確認
-  → プルアップ抵抗確認（1.8kΩ～4.7kΩ）
-  → センサー電源確認
-  → XSHUT制御確認
+1. カルマンフィルタを使用（[stage8](development/stage8_filtered_streaming/)）
+2. タイミングバジェットを増やす（精度向上）
+3. 測定対象の反射率を確認
 
 ## 次のステップ
 
-以下の順で進めてください：
+1. ✅ [basic_polling](basic_polling/) でポーリング測定を試す
+2. ✅ [basic_interrupt](basic_interrupt/) で割り込み測定を試す
+3. 📚 [development/](development/) で高度な機能を学ぶ
+4. 🚀 自分のプロジェクトに組み込む
 
-1. ✅ Stage 1実行 → デバイス検出確認
-2. ✅ Stage 2実行 → レジスタ読み出し確認
-3. 🔲 Stage 3実装 → API初期化確認
-4. 🔲 Stage 4実装 → 距離測定動作確認
-5. 🔲 Stage 5実装 → 割り込み動作確認
-6. 🔲 Stage 6実装 → 2センサー統合確認
-
-各ステージの詳細な実装計画は、プロジェクトルートの [README.md](../README.md) を参照してください。
+詳細なドキュメントは [メインREADME](../README.md) を参照してください。

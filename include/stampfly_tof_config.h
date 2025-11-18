@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2024 StampFly ToF Driver Contributors
+ */
+
 /**
  * @file stampfly_tof_config.h
  * @brief StampFly ToF Sensor Configuration

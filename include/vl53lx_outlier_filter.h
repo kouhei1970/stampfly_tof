@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2024 StampFly ToF Driver Contributors
+ */
+
 /**
  * @file vl53lx_outlier_filter.h
  * @brief VL53LX 1D Kalman Filter for ToF Measurements

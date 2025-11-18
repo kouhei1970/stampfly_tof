@@ -1,3 +1,8 @@
+/*
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2024 StampFly ToF Driver Contributors
+ */
+
 /**
  * @file vl53lx_platform.c
  * @brief VL53LX Platform Layer Implementation for ESP-IDF

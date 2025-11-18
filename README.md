@@ -4,14 +4,15 @@ ESP32-S3ベースのM5Stamp Fly用VL53L3CX Time-of-Flight (ToF)距離センサ�
 
 ## 概要
 
-このプロジェクトは、StampFly（M5Stamp S3搭載クアッドコプター）に搭載されたVL53L3CX ToFセンサーを使用するための最小構成ドライバとサンプルコードを提供します。
+このプロジェクトは、StampFly（M5Stamp S3搭載クアッドコプター）に搭載されたVL53L3CX ToFセンサーを使用するためのESP-IDFコンポーネントとサンプルコードを提供します。
 
 ### 主な特徴
 
 - ESP-IDF向けに最適化されたコンポーネント構成
-- 段階的な学習・テストが可能なサンプルコード
+- シンプルで分かりやすいサンプルコード（ポーリング/割り込み）
 - 距離測定に必要な最小限のAPIのみを抽出
-- タイミングバジェット33ms対応
+- 1Dカルマンフィルタによる外れ値除去
+- タイミングバジェット33ms対応（約30Hz測定レート）
 - 2センサー同時使用対応（前方/底面）
 
 ## ハードウェア仕様
@@ -53,168 +54,112 @@ stampfly_tof/
 ├── Kconfig                     # 設定オプション
 ├── include/                    # ヘッダーファイル
 │   ├── stampfly_tof_config.h   # 設定ヘッダー
-│   └── vl53lx/                 # VL53LX公式ヘッダー（今後追加）
+│   ├── vl53lx_outlier_filter.h # 1Dカルマンフィルタ
+│   └── vl53lx/                 # VL53LX公式ヘッダー
 ├── src/                        # ソースファイル
-│   ├── stampfly_tof.c          # StampFly専用API（今後追加）
-│   ├── vl53lx_platform.c       # プラットフォーム層（今後追加）
-│   └── vl53lx/                 # VL53LXコアドライバ（今後追加）
-├── examples/                   # サンプルプロジェクト（独立実行可能）
-│   ├── stage1_i2c_scan/        # ✅ Stage 1: I2Cバススキャン
-│   │   ├── CMakeLists.txt      #    プロジェクト定義
-│   │   ├── main/               #    メインコンポーネント
-│   │   │   ├── CMakeLists.txt
-│   │   │   └── main.c
-│   │   └── README.md
-│   ├── stage2_register_test/   # 🔲 Stage 2: レジスタ読み書き
-│   ├── stage3_device_init/     # 🔲 Stage 3: デバイス初期化
-│   ├── stage4_polling/         # 🔲 Stage 4: ポーリング測定
-│   ├── stage5_interrupt/       # 🔲 Stage 5: 割り込み測定
-│   └── stage6_dual_sensor/     # 🔲 Stage 6: 2センサー統合
+│   ├── vl53lx_platform.c       # プラットフォーム層（ESP-IDF I2C抽象化）
+│   ├── vl53lx_outlier_filter.c # 1Dカルマンフィルタ実装
+│   └── vl53lx/                 # VL53LXコアドライバ（ST BareDriver 1.2.14）
+├── examples/                   # サンプルプロジェクト
+│   ├── basic_polling/          # ⭐ 基本ポーリング測定（初心者向け）
+│   ├── basic_interrupt/        # ⭐ 基本割り込み測定（初心者向け）
+│   └── development/            # 開発用詳細サンプル
+│       ├── stage1_i2c_scan/    # I2Cバススキャン
+│       ├── stage2_register_test/ # レジスタ読み書き
+│       ├── stage3_device_init/ # デバイス初期化
+│       ├── stage4_polling_measurement/ # ポーリング測定
+│       ├── stage5_interrupt_measurement/ # 割り込み測定
+│       ├── stage6_dual_sensor/ # 2センサー統合
+│       ├── stage7_teleplot_streaming/ # Teleplotストリーミング
+│       └── stage8_filtered_streaming/ # カルマンフィルタ付きストリーミング
 ├── docs/                       # メーカードキュメント
 └── README.md                   # このファイル
 ```
 
-## 使用方法
+## クイックスタート
 
-### 方法1: サンプルプロジェクトを直接実行（推奨）
+### 1. サンプルを試す（推奨）
 
-`examples/` フォルダ内の各ステージは独立したESP-IDFプロジェクトです。各フォルダ内で直接ビルド・実行できます。
+まずはシンプルなサンプルから始めましょう：
 
 ```bash
-# Stage 1に移動
-cd examples/stage1_i2c_scan
-
-# ESP-IDF環境を有効化
-. ~/esp/esp-idf/export.sh
-
-# ターゲット設定（初回のみ）
+# 基本ポーリング測定
+cd examples/basic_polling
 idf.py set-target esp32s3
+idf.py build flash monitor
 
-# ビルド
-idf.py build
-
-# フラッシュとモニタ
-idf.py flash monitor
+# または、基本割り込み測定（より効率的）
+cd examples/basic_interrupt
+idf.py set-target esp32s3
+idf.py build flash monitor
 ```
 
-### 方法2: 自分のプロジェクトでコンポーネントとして使用
+各サンプルの詳細は [examples/README.md](examples/README.md) を参照してください。
+
+### 2. 自分のプロジェクトで使用する
 
 このフォルダをあなたのESP-IDFプロジェクトの `components/` ディレクトリにコピーします。
 
 ```bash
-# 例：新しいプロジェクトを作成
+# プロジェクトを作成
 idf.py create-project my_tof_project
 cd my_tof_project
 
 # stampfly_tofコンポーネントをコピー
 cp -r /path/to/stampfly_tof components/
+```
 
-# main/CMakeLists.txtでstampfly_tofを要求
-# idf_component_register(
-#     SRCS "main.c"
-#     INCLUDE_DIRS "."
-#     REQUIRES stampfly_tof  # <- 追加
-# )
+`main/CMakeLists.txt`でstampfly_tofコンポーネントを要求：
 
-# ビルド
+```cmake
+idf_component_register(
+    SRCS "main.c"
+    INCLUDE_DIRS "."
+    REQUIRES stampfly_tof  # <- 追加
+)
+```
+
+`main/main.c`でコードを実装（[basic_polling](examples/basic_polling/)や[basic_interrupt](examples/basic_interrupt/)を参考）：
+
+```c
+#include "vl53lx_platform.h"
+#include "vl53lx_api.h"
+#include "stampfly_tof_config.h"
+
+// I2C初期化、センサー電源ON、測定...
+// 詳細は examples/basic_polling/main/main.c を参照
+```
+
+ビルド＆実行：
+
+```bash
 idf.py build flash monitor
 ```
 
-## 段階的実装ガイド
+## サンプルプログラム
 
-### ✅ Stage 1: I2Cバススキャン
+### 初心者向けサンプル
 
-**目的**: I2C通信の基本動作確認とVL53L3CX検出
+まずはこちらから始めてください：
 
-**内容**:
-- I2Cマスター初期化
-- バススキャン（0x03～0x77）
-- XSHUTピン制御
+- [basic_polling](examples/basic_polling/) - シンプルなポーリング測定
+- [basic_interrupt](examples/basic_interrupt/) - 割り込みベース測定（より効率的）
 
-**期待結果**:
-```
-Device found at address 0x29
-  -> VL53L3CX detected at default address!
-```
+### 開発用詳細サンプル
 
-**詳細**: [examples/stage1_i2c_scan/README.md](examples/stage1_i2c_scan/README.md)
+より詳細な実装や高度な機能を知りたい場合：
 
-**ビルドテスト**: ✅ 成功
+- [development/stage1-8](examples/development/) - 段階的な学習用サンプル
+  - Stage 1: I2Cバススキャン
+  - Stage 2: レジスタ読み書き
+  - Stage 3: デバイス初期化
+  - Stage 4: ポーリング測定（詳細版）
+  - Stage 5: 割り込み測定（詳細版）
+  - Stage 6: 2センサー同時使用
+  - Stage 7: Teleplotリアルタイム可視化
+  - Stage 8: カルマンフィルタ付きストリーミング
 
-### ✅ Stage 2: レジスタ読み書きテスト
-
-**目的**: VL53L3CXレジスタへの直接アクセス確認
-
-**内容**:
-- プラットフォーム層実装
-- Model ID / Module Type レジスタ読み出し
-
-**期待結果**:
-- Model ID = 0xEA (VL53L3CX識別子)
-- Module Type = 0xAA (VL53L3CX固有の値、注: 0xCCはVL53L1)
-
-**詳細**: [examples/stage2_register_test/README.md](examples/stage2_register_test/README.md)
-
-**ビルドテスト**: ✅ 成功
-**実機テスト**: ✅ 成功
-
-### ✅ Stage 3: デバイス初期化
-
-**目的**: VL53LX API初期化シーケンス確認
-
-**内容**:
-- VL53LXドライバコア実装 (BareDriver 1.2.14)
-- デバイスブート待機 (VL53LX_WaitDeviceBooted)
-- デバイス初期化 (VL53LX_DataInit)
-- デバイス情報取得 (VL53LX_GetDeviceInfo)
-
-**期待結果**:
-- デバイスが正常にブート
-- Product Type = 0xAA (VL53L3CX)
-- 初期化完了
-
-**詳細**: [examples/stage3_device_init/README.md](examples/stage3_device_init/README.md)
-
-**ビルドテスト**: ✅ 成功
-**実機テスト**: ✅ 成功 (Product Type: 0xAA, Rev 1.1)
-
-### ✅ Stage 4: ポーリング測定
-
-**目的**: 基本的な距離測定（タイミングバジェット33ms）
-
-**内容**:
-- 測定パラメータ設定（Distance Mode: MEDIUM, Timing Budget: 33ms）
-- VL53LX Multi-Ranging API使用
-- ポーリングによるデータ取得
-- 複数オブジェクト検出サポート
-- 1秒間隔で20回測定
-
-**期待結果**:
-- 距離データ取得成功（mm単位）
-- RangeStatus = 0（有効な測定）
-- 検出オブジェクト数表示
-
-**詳細**: [examples/stage4_polling_measurement/README.md](examples/stage4_polling_measurement/README.md)
-
-**ビルドテスト**: ✅ 成功
-
-### 🔲 Stage 5: 割り込み測定（未実装）
-
-**目的**: GPIO割り込みによる効率的なデータ取得
-
-**内容**:
-- 割り込みハンドラ実装
-- FreeRTOSセマフォ使用
-- 低消費電力動作
-
-### 🔲 Stage 6: 2センサー統合（未実装）
-
-**目的**: 前方・底面センサーの同時動作
-
-**内容**:
-- I2Cアドレス変更シーケンス
-- 複数センサー管理
-- 個別割り込み処理
+詳細は [examples/development/README.md](examples/development/README.md) を参照してください。
 
 ## 設定オプション
 
@@ -230,21 +175,15 @@ Component config → StampFly ToF Sensor Configuration
 - ToFセンサーXSHUT/INT GPIO番号
 - タイミングバジェット（8～500ms）
 
-## 現在のステータス
+## 主要機能
 
-- ✅ プロジェクト構成確立（examples内で独立実行可能）
-- ✅ CMakeLists.txt / Kconfig作成
-- ✅ Stage 1サンプル実装・ビルド確認
-- ✅ Stage 1独立プロジェクト化完了
-- 🔲 Stage 2以降のサンプル実装予定
-- 🔲 VL53LXドライバ最小構成の抽出予定
-
-## 次のステップ
-
-1. Stage 1をハードウェアでテスト
-2. Stage 2のプラットフォーム層実装
-3. 必要なVL53LXドライバファイルの抽出
-4. Stage 3～6の順次実装
+- ✅ ESP-IDF I2C master API対応
+- ✅ VL53LX BareDriver 1.2.14統合
+- ✅ シンプルなサンプルコード（ポーリング/割り込み）
+- ✅ 2センサー同時使用対応
+- ✅ 1Dカルマンフィルタ（外れ値除去）
+- ✅ Teleplotリアルタイム可視化対応
+- ✅ 詳細な開発用ステージサンプル（Stage 1-8）
 
 ## 参考ドキュメント
 
