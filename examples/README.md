@@ -189,6 +189,7 @@ void app_main(void) {
 1. ✅ [basic_polling](basic_polling/) でポーリング測定を試す
 2. ✅ [basic_interrupt](basic_interrupt/) で割り込み測定を試す
 3. 📚 [development/](development/) で高度な機能を学ぶ
-4. 🚀 自分のプロジェクトに組み込む
+4. 📖 [API仕様書](../docs/API.md) で関数リファレンスを確認
+5. 🚀 自分のプロジェクトに組み込む
 
 詳細なドキュメントは [メインREADME](../README.md) を参照してください。

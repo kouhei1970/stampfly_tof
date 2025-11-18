@@ -119,16 +119,62 @@ idf_component_register(
 )
 ```
 
-`main/main.c`でコードを実装（[basic_polling](examples/basic_polling/)や[basic_interrupt](examples/basic_interrupt/)を参考）：
+`main/main.c`で距離測定を実装：
 
 ```c
 #include "vl53lx_platform.h"
 #include "vl53lx_api.h"
 #include "stampfly_tof_config.h"
 
-// I2C初期化、センサー電源ON、測定...
-// 詳細は examples/basic_polling/main/main.c を参照
+void app_main(void) {
+    // 1. I2C初期化
+    i2c_master_bus_handle_t i2c_bus;
+    i2c_master_bus_config_t bus_config = {
+        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .i2c_port = I2C_NUM_0,
+        .scl_io_num = STAMPFLY_I2C_SCL_GPIO,
+        .sda_io_num = STAMPFLY_I2C_SDA_GPIO,
+        .glitch_ignore_cnt = 7,
+        .flags.enable_internal_pullup = true,
+    };
+    i2c_new_master_bus(&bus_config, &i2c_bus);
+
+    // 2. センサー電源ON（底面ToF）
+    gpio_set_level(STAMPFLY_TOF_BOTTOM_XSHUT, 1);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    // 3. デバイス初期化
+    VL53LX_Dev_t dev;
+    dev.I2cDevAddr = 0x29;
+    VL53LX_platform_init(&dev, i2c_bus);
+    VL53LX_WaitDeviceBooted(&dev);
+    VL53LX_DataInit(&dev);
+
+    // 4. 測定設定
+    VL53LX_SetDistanceMode(&dev, VL53LX_DISTANCEMODE_MEDIUM);
+    VL53LX_SetMeasurementTimingBudgetMicroSeconds(&dev, 33000);
+
+    // 5. 測定開始
+    VL53LX_StartMeasurement(&dev);
+
+    // 6. 測定ループ
+    while (1) {
+        uint8_t ready = 0;
+        VL53LX_GetMeasurementDataReady(&dev, &ready);
+        if (ready) {
+            VL53LX_MultiRangingData_t data;
+            VL53LX_GetMultiRangingData(&dev, &data);
+
+            printf("Distance: %d mm\n", data.RangeData[0].RangeMilliMeter);
+
+            VL53LX_ClearInterruptAndStartMeasurement(&dev);
+        }
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
 ```
+
+完全なコード例は [examples/basic_polling](examples/basic_polling/) または [examples/basic_interrupt](examples/basic_interrupt/) を参照してください。
 
 ビルド＆実行：
 
@@ -185,11 +231,24 @@ Component config → StampFly ToF Sensor Configuration
 - ✅ Teleplotリアルタイム可視化対応
 - ✅ 詳細な開発用ステージサンプル（Stage 1-8）
 
+## API仕様
+
+詳細なAPI仕様は [docs/API.md](docs/API.md) を参照してください。
+
+主要なAPI：
+- **プラットフォーム層**: `VL53LX_platform_init()`, `VL53LX_platform_deinit()`
+- **初期化**: `VL53LX_WaitDeviceBooted()`, `VL53LX_DataInit()`, `VL53LX_GetDeviceInfo()`
+- **測定設定**: `VL53LX_SetDistanceMode()`, `VL53LX_SetMeasurementTimingBudgetMicroSeconds()`
+- **測定制御**: `VL53LX_StartMeasurement()`, `VL53LX_StopMeasurement()`
+- **データ取得**: `VL53LX_GetMeasurementDataReady()`, `VL53LX_GetMultiRangingData()`, `VL53LX_ClearInterruptAndStartMeasurement()`
+- **カルマンフィルタ**: `VL53LX_FilterInit()`, `VL53LX_FilterUpdate()`, `VL53LX_FilterReset()`
+
 ## 参考ドキュメント
 
-- [VL53L3CX Driver Documentation](docs/VL53L3CX_driver_doc.md)
-- [M5StamFly Specifications](docs/M5StamFly_spec_ja.md)
-- [VL53L3CX BareDriver (Manufacturer)](docs/VL53L3CX_BareDriver_1.2.14/)
+- **[API Reference](docs/API.md)** - API仕様書（関数リファレンス）
+- [VL53L3CX Driver Documentation](docs/VL53L3CX_driver_doc.md) - ドライバ概要
+- [M5StamFly Specifications](docs/M5StamFly_spec_ja.md) - ハードウェア仕様
+- [VL53L3CX BareDriver (Manufacturer)](docs/VL53L3CX_BareDriver_1.2.14/) - STメーカードライバ
 
 ## ライセンス
 
